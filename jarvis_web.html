@@ -1,0 +1,1478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>J.A.R.V.I.S — WEESTREAM INTELLIGENCE TERMINAL v5.0</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+
+:root {
+  --bg:       #000810;
+  --cyan:     #00e5ff;
+  --cyan2:    #0097a7;
+  --blue:     #1565c0;
+  --blue2:    #42a5f5;
+  --green:    #00e676;
+  --red:      #ff1744;
+  --yellow:   #ffd600;
+  --dim:      #546e7a;
+  --dim2:     #263238;
+  --white:    #eceff1;
+}
+
+html, body {
+  width:100%; height:100%;
+  background:var(--bg);
+  color:var(--cyan);
+  font-family:'Courier New','Consolas',monospace;
+  font-size:11px;
+  line-height:1.35;
+  overflow:hidden;
+}
+
+#terminal {
+  display:flex;
+  flex-direction:column;
+  height:100vh;
+  width:100%;
+  max-width:700px;
+  margin:0 auto;
+  padding:3px 7px;
+  gap:0;
+}
+
+/* ── separators ── */
+.sep {
+  border:none;
+  border-top:1px solid #1a3a5c;
+  margin:2px 0;
+  flex-shrink:0;
+}
+
+/* ── header ── */
+#header {
+  display:flex;
+  align-items:center;
+  gap:0;
+  padding:2px 0;
+  flex-shrink:0;
+  font-size:11px;
+}
+#header .title  { color:var(--cyan); font-weight:bold; }
+#header .slash  { color:var(--dim); margin:0 6px; }
+#header .ws-lbl { font-weight:bold; }
+.ws-CONNECTED   { color:var(--green); }
+.ws-OFFLINE     { color:var(--dim); }
+.ws-ERROR       { color:var(--red); }
+.ws-CONNECTING  { color:var(--yellow); }
+#header .clock  { color:var(--dim); margin-left:auto; }
+
+/* ── spectrum ── */
+#spec-info {
+  font-size:11px;
+  color:var(--dim);
+  padding:2px 0 2px;
+  flex-shrink:0;
+}
+#spec-info .freq   { color:var(--cyan2); }
+#spec-info .amp    { color:var(--blue2); }
+#spec-info .neural { color:var(--blue2); }
+
+#spec-canvas {
+  width:100%;
+  height:44px;
+  display:block;
+  flex-shrink:0;
+}
+
+/* ── chat ── */
+#chat {
+  flex:1 1 0;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  justify-content:flex-end;
+  padding:2px 0;
+  overflow:hidden;
+  gap:1px;
+}
+
+.chat-row {
+  display:flex;
+  align-items:baseline;
+  gap:4px;
+  font-size:11px;
+  white-space:pre-wrap;
+  word-break:break-word;
+}
+.lbl       { min-width:52px; font-weight:bold; flex-shrink:0; }
+.arr       { color:var(--dim); flex-shrink:0; }
+.lbl-ai    { color:var(--cyan); }
+.lbl-user  { color:var(--green); }
+.lbl-sys   { color:var(--dim); }
+.txt-ai    { color:var(--cyan2); }
+.txt-user  { color:#2e7d32; }
+.txt-sys   { color:var(--dim); }
+
+/* ── status ── */
+#status-row {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:2px 0;
+  font-size:11px;
+  font-weight:bold;
+  flex-shrink:0;
+}
+#status-arrow { flex-shrink:0; }
+#status-text  { flex:1; }
+.st-listening { color:var(--red); }
+.st-speaking  { color:var(--cyan); }
+.st-idle      { color:var(--blue2); }
+.cursor-blink {
+  display:inline-block;
+  width:8px; height:13px;
+  background:currentColor;
+  vertical-align:text-bottom;
+  animation:blink .5s step-end infinite;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+/* ── footer ── */
+#footer {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:2px 0 2px;
+  font-size:10px;
+  color:var(--dim);
+  flex-shrink:0;
+}
+.key { color:var(--yellow); font-weight:bold; }
+
+#mic-btn {
+  background:none;
+  border:1px solid var(--cyan);
+  color:var(--cyan);
+  padding:2px 8px;
+  font-family:inherit;
+  font-size:10px;
+  cursor:pointer;
+  border-radius:2px;
+  transition:background .15s;
+}
+#mic-btn:hover   { background:#003040; }
+#mic-btn.active  { border-color:var(--red); color:var(--red); }
+
+#level-wrap { display:flex; align-items:center; gap:0; }
+#level-fill  { display:inline-block; height:11px; background:var(--cyan); transition:width .04s; min-width:0; }
+#level-empty { display:inline-block; height:11px; background:var(--dim2); }
+
+#pending-info { color:var(--dim); font-size:10px; margin-left:auto; }
+
+/* ── URL bar ── */
+#url-bar {
+  display:none;
+  flex-shrink:0;
+  background:#001420;
+  border:1px solid #1a3a5c;
+  border-radius:3px;
+  padding:5px 8px;
+  margin:2px 0;
+  gap:6px;
+  align-items:flex-start;
+  flex-direction:column;
+}
+#url-bar.visible { display:flex; }
+#url-bar-label {
+  color:var(--dim);
+  font-size:10px;
+  letter-spacing:2px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  width:100%;
+}
+#url-bar-label button {
+  background:none;
+  border:none;
+  color:var(--dim);
+  font-size:11px;
+  cursor:pointer;
+  padding:0 2px;
+  font-family:inherit;
+}
+#url-bar-label button:hover { color:var(--red); }
+#url-links {
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+  width:100%;
+}
+.url-link-row {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  font-size:11px;
+}
+.url-link-slot {
+  color:var(--dim);
+  min-width:14px;
+}
+.url-link-row a {
+  color:var(--cyan2);
+  text-decoration:none;
+  flex:1;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  max-width:600px;
+  border-bottom:1px solid transparent;
+  transition:color .15s, border-color .15s;
+}
+.url-link-row a:hover { color:var(--cyan); border-bottom-color:var(--cyan); }
+.url-link-status { color:var(--dim); font-size:10px; min-width:60px; text-align:right; }
+
+/* ── API key setup overlay ── */
+#setup-overlay {
+  display:none;
+  position:fixed;
+  inset:0;
+  background:rgba(0,8,16,.88);
+  z-index:100;
+  align-items:center;
+  justify-content:center;
+}
+#setup-overlay.visible { display:flex; }
+#setup-box {
+  background:#000d1a;
+  border:1px solid var(--cyan);
+  border-radius:4px;
+  padding:22px 26px;
+  width:340px;
+  font-family:'Courier New','Consolas',monospace;
+  color:var(--cyan);
+}
+#setup-box h2 {
+  font-size:12px;
+  letter-spacing:3px;
+  margin-bottom:4px;
+}
+#setup-box .setup-sub {
+  font-size:10px;
+  color:var(--dim);
+  margin-bottom:18px;
+  letter-spacing:1px;
+}
+.setup-step {
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  margin-bottom:14px;
+}
+.setup-num {
+  color:var(--yellow);
+  font-weight:bold;
+  font-size:12px;
+  min-width:18px;
+  padding-top:2px;
+}
+.setup-body { flex:1; }
+.setup-label {
+  font-size:11px;
+  color:var(--cyan);
+  margin-bottom:5px;
+}
+.setup-btn {
+  background:none;
+  border:1px solid var(--cyan2);
+  color:var(--cyan2);
+  font-family:inherit;
+  font-size:10px;
+  padding:3px 10px;
+  cursor:pointer;
+  border-radius:2px;
+  letter-spacing:1px;
+  transition:background .15s, color .15s;
+}
+.setup-btn:hover { background:#002030; color:var(--cyan); border-color:var(--cyan); }
+.setup-btn.done  { border-color:var(--green); color:var(--green); }
+#setup-token-input {
+  width:100%;
+  background:#001020;
+  border:1px solid var(--dim);
+  color:var(--cyan);
+  font-family:inherit;
+  font-size:10px;
+  padding:5px 7px;
+  border-radius:2px;
+  box-sizing:border-box;
+  margin-bottom:6px;
+  outline:none;
+  transition:border-color .15s;
+}
+#setup-token-input:focus { border-color:var(--cyan); }
+#setup-save-btn {
+  width:100%;
+  background:none;
+  border:1px solid var(--cyan);
+  color:var(--cyan);
+  font-family:inherit;
+  font-size:11px;
+  padding:5px;
+  cursor:pointer;
+  border-radius:2px;
+  letter-spacing:2px;
+  transition:background .15s;
+}
+#setup-save-btn:hover { background:#003040; }
+#setup-error {
+  font-size:10px;
+  color:var(--red);
+  margin-top:6px;
+  min-height:14px;
+}
+</style>
+</head>
+<body>
+<div id="terminal">
+
+  <!-- HEADER -->
+  <div id="header">
+    <span class="title">◈ J.A.R.V.I.S</span>
+    <span class="slash">/</span>
+    <span class="slash">WEESTREAM</span>
+    <span class="slash">/</span>
+    <span id="ws-el" class="ws-lbl ws-OFFLINE">◈ OFFLINE</span>
+    <span class="clock" id="clock">00:00:00</span>
+  </div>
+  <hr class="sep">
+
+  <!-- SPECTRUM -->
+  <div id="spec-info">
+    <span>▸ SPECTRAL&nbsp;</span>
+    <span class="freq"  id="freq-el">FREQ&nbsp;&nbsp;440Hz</span>
+    <span style="color:var(--dim)">  ·  </span>
+    <span class="amp"   id="amp-el">AMP 0.00100</span>
+    <span style="color:var(--dim)">  ·  </span>
+    <span class="neural" id="neural-el">NEURAL 98.4%</span>
+  </div>
+  <canvas id="spec-canvas"></canvas>
+  <hr class="sep">
+
+  <!-- CHAT -->
+  <div id="chat"></div>
+  <hr class="sep">
+
+  <!-- URL BAR — always-visible clickable links when tabs are pending/open -->
+  <div id="url-bar">
+    <div id="url-bar-label">
+      <span>◈ SOURCES</span>
+      <button onclick="closeAllTabs()" title="Close all tabs">✕ CLOSE ALL</button>
+    </div>
+    <div id="url-links"></div>
+  </div>
+
+  <!-- STATUS -->
+  <div id="status-row">
+    <span id="status-arrow" class="st-idle">▶</span>
+    <span id="status-text"  class="st-idle">INITIALIZING SYSTEMS...</span>
+    <span class="cursor-blink" id="cursor-el"></span>
+  </div>
+  <hr class="sep">
+
+  <!-- FOOTER -->
+  <div id="footer">
+    <button id="mic-btn" onclick="toggleMic()">[ MIC ]</button>
+    <span><span class="key">[Space]</span>&nbsp;mic&nbsp;&nbsp;<span class="key">[Enter]</span>&nbsp;reconnect</span>
+    <span>◈&nbsp;LEVEL&nbsp;▐</span>
+    <span id="level-wrap">
+      <span id="level-fill"  style="width:0px"></span>
+      <span id="level-empty" style="width:72px"></span>
+    </span>
+    <span>▌</span>
+    <span id="pending-info"></span>
+  </div>
+
+</div><!-- #terminal -->
+
+<!-- API KEY SETUP OVERLAY -->
+<div id="setup-overlay">
+  <div id="setup-box">
+    <h2>◈ API KEY REQUIRED</h2>
+    <div class="setup-sub">TOKEN NOT FOUND OR INVALID — FOLLOW STEPS BELOW</div>
+
+    <div class="setup-step">
+      <div class="setup-num">1.</div>
+      <div class="setup-body">
+        <div class="setup-label">CREATE A FREE TOINGG ACCOUNT</div>
+        <button class="setup-btn" id="step1-btn" onclick="setupStep1()">OPEN SIGNUP PAGE ↗</button>
+      </div>
+    </div>
+
+    <div class="setup-step">
+      <div class="setup-num">2.</div>
+      <div class="setup-body">
+        <div class="setup-label">GENERATE YOUR API KEY</div>
+        <button class="setup-btn" id="step2-btn" onclick="setupStep2()">OPEN API-KEY PAGE ↗</button>
+      </div>
+    </div>
+
+    <div class="setup-step">
+      <div class="setup-num">3.</div>
+      <div class="setup-body">
+        <div class="setup-label">PASTE YOUR API KEY BELOW</div>
+        <input id="setup-token-input" type="text" placeholder="Paste API key here..." spellcheck="false" />
+        <button id="setup-save-btn" onclick="setupSave()">SAVE &amp; CONNECT</button>
+        <div id="setup-error"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+//  CONFIG  (loaded from config.json — see config.example.json)
+// ═══════════════════════════════════════════════════════════════════
+let WS_URL  = "";
+let TOKEN   = "";
+let CAMP_ID = "";
+const SAMPLE_IN  = 8000;    // mic rate sent to server
+const SAMPLE_OUT = 22050;   // server audio rate
+const CHUNK_SEND = 2048;    // float32 samples per WS send (matches py: 4×512)
+const BARS       = 64;      // spectrum bar count
+
+// ── Mic sensitivity (mirrors py constants) ───────────────────────
+const MIC_ENERGY_THRESHOLD = 600;
+const WAKE_WORDS = ["jarvis","hey jarvis","hey toingg","toingg"];
+
+// ═══════════════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════════════
+let wsConn      = null;
+let wsStatus    = "OFFLINE";
+let isListening = false;
+let isPlaying   = false;
+let statusMsg   = "INITIALIZING SYSTEMS...";
+let chatLines   = [];
+let lastText    = "";
+let micRms      = 0;
+let audioRms    = 0;
+let dropAudio   = false;
+let pendingUrls = [];
+
+// spectrum animation state
+let barH       = new Float32Array(BARS).fill(0);
+let freqVal    = 440;
+let ampVal     = 0;
+let neuralVal  = 98.4;
+
+// audio engine
+let audioCtx      = null;
+let playGain      = null;    // all playback sources connect here
+let playAnalyser  = null;    // reads playback RMS
+let micStream     = null;
+let scriptNode    = null;    // ScriptProcessorNode for mic capture
+let micSource     = null;
+let micAnalyser   = null;
+let nextPlayTime  = 0;
+let playScheduled = 0;       // count of scheduled+unfinished buffers
+
+// speech recognition for wake word
+let wakeRec = null;
+
+// ═══════════════════════════════════════════════════════════════════
+//  DOM REFS
+// ═══════════════════════════════════════════════════════════════════
+const wsEl       = document.getElementById("ws-el");
+const clockEl    = document.getElementById("clock");
+const freqEl     = document.getElementById("freq-el");
+const ampEl      = document.getElementById("amp-el");
+const neuralEl   = document.getElementById("neural-el");
+const specCanvas = document.getElementById("spec-canvas");
+const specCtx    = specCanvas.getContext("2d");
+const chatEl     = document.getElementById("chat");
+const statusArrow= document.getElementById("status-arrow");
+const statusText = document.getElementById("status-text");
+const micBtn     = document.getElementById("mic-btn");
+const levelFill  = document.getElementById("level-fill");
+const levelEmpty = document.getElementById("level-empty");
+const pendingInfo= document.getElementById("pending-info");
+
+// ═══════════════════════════════════════════════════════════════════
+//  HELPERS
+// ═══════════════════════════════════════════════════════════════════
+function b64ToFloat32(b64) {
+  const bin  = atob(b64);
+  const buf  = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+  return new Float32Array(buf.buffer);
+}
+
+// Fastest b64 encode for Float32Array
+function float32ToB64(f32) {
+  const u8  = new Uint8Array(f32.buffer, f32.byteOffset, f32.byteLength);
+  let bin   = "";
+  // process in chunks to avoid stack overflow on large arrays
+  const SZ  = 0x8000;
+  for (let i = 0; i < u8.length; i += SZ)
+    bin += String.fromCharCode.apply(null, u8.subarray(i, i + SZ));
+  return btoa(bin);
+}
+
+function rms(f32) {
+  let s = 0;
+  for (let i = 0; i < f32.length; i++) s += f32[i] * f32[i];
+  return Math.sqrt(s / f32.length);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  STATUS / WS LABEL
+// ═══════════════════════════════════════════════════════════════════
+function setStatus(m) {
+  statusMsg = m;
+  statusText.textContent = m;
+  const cls = isListening ? "st-listening" : isPlaying ? "st-speaking" : "st-idle";
+  statusText.className   = cls;
+  statusArrow.className  = cls;
+  pushState();
+}
+
+function setWs(s) {
+  wsStatus = s;
+  wsEl.className   = `ws-lbl ws-${s}`;
+  wsEl.textContent = `◈ ${s}`;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  CHAT
+// ═══════════════════════════════════════════════════════════════════
+function logChat(role, text) {
+  chatLines.push({ role, text: String(text).slice(0, 180) });
+  if (chatLines.length > 32) chatLines.shift();
+  if (role === "ai" || role === "user") lastText = String(text).slice(0, 100);
+  renderChat();
+}
+
+function renderChat() {
+  const rows = chatLines.slice(-8);
+  chatEl.innerHTML = "";
+  for (const { role, text } of rows) {
+    const div  = document.createElement("div");
+    div.className = "chat-row";
+    const lbl  = document.createElement("span");
+    const arr  = document.createElement("span");
+    const txt  = document.createElement("span");
+    arr.className = "arr";
+    arr.textContent = "▸";
+    if (role === "ai") {
+      lbl.className = "lbl lbl-ai";   lbl.textContent = "JARVIS";
+      txt.className = "txt-ai";
+    } else if (role === "user") {
+      lbl.className = "lbl lbl-user"; lbl.textContent = "   YOU";
+      txt.className = "txt-user";
+    } else {
+      lbl.className = "lbl lbl-sys";  lbl.textContent = "   SYS";
+      txt.className = "txt-sys";
+    }
+    txt.textContent = text;
+    div.appendChild(lbl);
+    div.appendChild(arr);
+    div.appendChild(txt);
+    chatEl.appendChild(div);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  SPECTRUM ANIMATION  (mirrors py animate_bars + render_spectrum_block)
+// ═══════════════════════════════════════════════════════════════════
+function animateBars() {
+  const t = performance.now() / 1000;
+  if (isListening) {
+    freqVal = 200 + micRms * 3000 + Math.sin(t * 7) * 60;
+    ampVal  = micRms;
+    const energy = Math.max(micRms * 10, 0.35);
+    for (let i = 0; i < BARS; i++) {
+      const p = i / BARS;
+      let w = Math.sin(t*9  + p*Math.PI*4) * 0.35
+            + Math.sin(t*6  + p*Math.PI*7) * 0.25
+            + Math.sin(t*14 + p*Math.PI*2) * 0.20
+            + Math.sin(t*3  + p*Math.PI*9) * 0.15;
+      barH[i] = barH[i]*0.5 + Math.max(0.05, Math.min(1.0, (w+1)/2*energy))*0.5;
+    }
+  } else if (isPlaying) {
+    freqVal = 800 + audioRms * 5000 + Math.sin(t * 11) * 150;
+    ampVal  = audioRms;
+    const energy = Math.max(audioRms * 8, 0.3);
+    for (let i = 0; i < BARS; i++) {
+      const p = i / BARS;
+      let w = Math.sin(t*14 + p*Math.PI*6) * 0.40
+            + Math.sin(t*8  + p*Math.PI*3) * 0.35
+            + Math.sin(t*22 + p*Math.PI*9) * 0.15;
+      const spike = Math.pow(Math.random(), 3) * 0.30;
+      barH[i] = barH[i]*0.4 + Math.max(0.05, Math.min(1.0, Math.abs(w)*energy+spike))*0.6;
+    }
+  } else {
+    freqVal = 220 + Math.sin(t * 0.7) * 25;
+    ampVal  = 0.001 + Math.abs(Math.sin(t * 0.4)) * 0.003;
+    for (let i = 0; i < BARS; i++) {
+      const p = i / BARS;
+      const h = 0.02 + ((Math.sin(t*0.9 + p*Math.PI*2)+1)/2*0.5
+                      + (Math.sin(t*2.3 + p*Math.PI*5)+1)/2*0.3) * 0.06;
+      barH[i] = barH[i]*0.93 + h*0.07;
+    }
+  }
+  neuralVal = 95 + Math.sin(t * 0.3) * 3;
+}
+
+function drawSpectrum() {
+  const W = specCanvas.width, H = specCanvas.height;
+  const t = performance.now() / 1000;
+  specCtx.clearRect(0, 0, W, H);
+
+  const ROWS    = 5;
+  const specH   = H - 8;   // reserve 8px for scan beam
+  const bw      = W / BARS;
+
+  // ── bars ──
+  for (let i = 0; i < BARS; i++) {
+    const h = barH[i];
+    const x = i * bw;
+    for (let row = 0; row < ROWS; row++) {
+      const threshold = row / ROWS;
+      const fill = (h - threshold) * ROWS;
+      if (fill <= 0) continue;
+      const frac   = Math.min(1, fill);
+      const sliceH = specH / ROWS;
+      const y      = specH - (row + frac) * sliceH;
+      const drawH  = frac * sliceH;
+
+      if      (h > 0.88 && row >= ROWS-1) specCtx.fillStyle = "#ffffff";
+      else if (h > 0.72 && row >= ROWS-2) specCtx.fillStyle = "#00e5ff";
+      else if (h > 0.52 && row >= ROWS-3) specCtx.fillStyle = "#0097a7";
+      else if (row >= ROWS-5)             specCtx.fillStyle = "#1565c0";
+      else                                specCtx.fillStyle = "#263238";
+
+      specCtx.fillRect(x + 0.5, y, Math.max(1, bw - 1.5), drawH);
+    }
+  }
+
+  // ── scan beam ──
+  const beamX = ((t * 35) % W);
+  for (let i = 0; i < W; i++) {
+    const d = Math.abs(i - beamX);
+    let col = null;
+    if      (d < 1)   col = "rgba(255,255,255,0.95)";
+    else if (d <= 2)  col = "rgba(0,229,255,0.65)";
+    else if (d <= 5)  col = "rgba(0,151,167,0.40)";
+    else if (d <= 12) col = "rgba(21,101,192,0.20)";
+    if (col) {
+      specCtx.fillStyle = col;
+      specCtx.fillRect(i, H - 6, 1, 6);
+    }
+  }
+}
+
+// ── level meter ──
+const LEVEL_W = 72;
+function updateLevel() {
+  const max = 18;
+  let fill = 0;
+  if (isListening)  fill = Math.min(max, Math.floor(micRms  * max * 14));
+  else if (isPlaying) fill = Math.min(max, Math.floor(audioRms * max * 8));
+  const px = fill / max * LEVEL_W;
+  levelFill.style.width  = px + "px";
+  levelFill.style.background = isListening ? "#ff1744" : "#00e5ff";
+  levelEmpty.style.width = (LEVEL_W - px) + "px";
+}
+
+// ── clock ──
+function updateClock() {
+  const n = new Date();
+  clockEl.textContent = n.toTimeString().slice(0, 8);
+}
+
+// ── spec info text ──
+function updateSpecInfo() {
+  freqEl.textContent   = `FREQ ${String(Math.floor(freqVal)).padStart(5)}Hz`;
+  ampEl.textContent    = `AMP ${ampVal.toFixed(5)}`;
+  neuralEl.textContent = `NEURAL ${neuralVal.toFixed(1)}%`;
+}
+
+// ── push state to server so jarvis_visual.html can poll it ──────────────────
+let _pushTimer = null;
+function pushState() {
+  clearTimeout(_pushTimer);
+  _pushTimer = setTimeout(async () => {
+    const st = isListening ? "listening"
+             : isPlaying   ? "speaking"
+             : wsStatus === "CONNECTED" ? "idle"
+             : "initializing";
+    try {
+      await fetch(`${SERVER}/state`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ state: st, text: lastText, status: statusMsg }),
+      });
+    } catch (_) {}
+  }, 60);
+}
+
+// ── read analyser RMS ──
+let _analyserBuf = null;
+function readAnalyserRms(analyser) {
+  if (!analyser) return 0;
+  if (!_analyserBuf || _analyserBuf.length !== analyser.fftSize)
+    _analyserBuf = new Float32Array(analyser.fftSize);
+  analyser.getFloatTimeDomainData(_analyserBuf);
+  return rms(_analyserBuf);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  CANVAS RESIZE
+// ═══════════════════════════════════════════════════════════════════
+function resizeCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = specCanvas.getBoundingClientRect();
+  const newW = Math.floor(rect.width  * dpr);
+  const newH = Math.floor(rect.height * dpr);
+  if (specCanvas.width !== newW || specCanvas.height !== newH) {
+    specCanvas.width  = newW;
+    specCanvas.height = newH;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  MAIN ANIMATION LOOP  (12 fps like terminal)
+// ═══════════════════════════════════════════════════════════════════
+let _lastFrame = 0;
+function loop(ts) {
+  requestAnimationFrame(loop);
+  if (ts - _lastFrame < 1000/14) return;  // ~14 fps cap
+  _lastFrame = ts;
+
+  // pull live RMS from analysers
+  if (isListening && micAnalyser)  micRms   = readAnalyserRms(micAnalyser)  * 12;
+  if (isPlaying   && playAnalyser) audioRms = readAnalyserRms(playAnalyser) * 4;
+
+  resizeCanvas();
+  animateBars();
+  drawSpectrum();
+  updateLevel();
+  updateClock();
+  updateSpecInfo();
+  setStatus(statusMsg); // refresh colour based on current state flags
+}
+requestAnimationFrame(loop);
+
+// ═══════════════════════════════════════════════════════════════════
+//  AUDIO CONTEXT INIT
+// ═══════════════════════════════════════════════════════════════════
+let _pendingMicStart = false;  // set true when mic blocked waiting for gesture
+
+// Any user interaction resumes AudioContext and retries pending mic start
+async function _onUserGesture() {
+  if (audioCtx && audioCtx.state === "suspended") {
+    try { await audioCtx.resume(); } catch(_) {}
+  }
+  if (_pendingMicStart && audioCtx && audioCtx.state === "running") {
+    _pendingMicStart = false;
+    startMic();
+  }
+}
+document.addEventListener("click",   _onUserGesture, { passive: true });
+document.addEventListener("keydown",  _onUserGesture, { passive: true });
+document.addEventListener("touchstart", _onUserGesture, { passive: true });
+
+function ensureAudioCtx() {
+  if (audioCtx) {
+    if (audioCtx.state === "suspended") audioCtx.resume().catch(()=>{});
+    return;
+  }
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_OUT });
+  nextPlayTime = audioCtx.currentTime;
+
+  // shared gain + analyser for all playback
+  playGain     = audioCtx.createGain();
+  playAnalyser = audioCtx.createAnalyser();
+  playAnalyser.fftSize = 256;
+  playGain.connect(playAnalyser);
+  playAnalyser.connect(audioCtx.destination);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  AUDIO PLAYBACK  (mirrors playback_worker + enqueue_audio)
+// ═══════════════════════════════════════════════════════════════════
+function enqueueAudio(b64) {
+  if (dropAudio) return;
+  ensureAudioCtx();
+
+  const samples = b64ToFloat32(b64);
+  if (!samples.length) return;
+
+  const buf    = audioCtx.createBuffer(1, samples.length, SAMPLE_OUT);
+  buf.copyToChannel(samples, 0);
+
+  const src    = audioCtx.createBufferSource();
+  src.buffer   = buf;
+  src.connect(playGain);
+
+  const startAt = Math.max(audioCtx.currentTime + 0.01, nextPlayTime);
+  src.start(startAt);
+  nextPlayTime = startAt + samples.length / SAMPLE_OUT;
+
+  playScheduled++;
+  isPlaying = true;
+  pushState();
+
+  // flush pending URLs on first audio chunk of a response
+  if (pendingUrls.length > 0) {
+    const batch = pendingUrls.splice(0);
+    setTimeout(() => openPendingUrls(batch), 0);
+  }
+
+  src.onended = () => {
+    playScheduled = Math.max(0, playScheduled - 1);
+    if (playScheduled === 0) {
+      isPlaying = false;
+      audioRms  = 0;
+      pushState();
+      setStatus("STANDING BY — SAY 'HEY JARVIS' TO ACTIVATE");
+      // Close Chrome slot windows 1.5s after audio finishes (matches terminal).
+      // Keep the URL bar visible so user can still click links.
+      setTimeout(() => {
+        if (!isPlaying) {
+          fetch(`${SERVER}/close_tabs`, { method:"POST", body:"" }).catch(()=>{});
+        }
+      }, 1500);
+    }
+  };
+}
+
+function stopAudio() {
+  if (audioCtx) nextPlayTime = audioCtx.currentTime;
+  playScheduled = 0;
+  isPlaying     = false;
+  audioRms      = 0;
+  // Recreate gain node so scheduled-but-unplayed buffers are silenced
+  if (playGain) {
+    playGain.disconnect();
+    playGain     = audioCtx.createGain();
+    playAnalyser = audioCtx.createAnalyser();
+    playAnalyser.fftSize = 256;
+    playGain.connect(playAnalyser);
+    playAnalyser.connect(audioCtx.destination);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  URL / TAB MANAGEMENT
+//
+//  Strategy (two-layer):
+//  1. Always render clickable links in #url-bar immediately — user
+//     can always click regardless of popup-blocker or server state.
+//  2. Also POST to the launcher server so Python opens Chrome windows
+//     at precise 2×2 grid positions (860×580, same as terminal).
+//     If the server is unreachable the links in the bar still work.
+// ═══════════════════════════════════════════════════════════════════
+const SERVER = "http://localhost:8766";
+
+const urlBarEl    = document.getElementById("url-bar");
+const urlLinksEl  = document.getElementById("url-links");
+
+// Normalise any URL item shape → { url, title }
+function normUrl(u) {
+  if (typeof u === "string") return { url: u, title: u };
+  return { url: u.url || u.href || "", title: u.title || u.label || u.url || u.href || "" };
+}
+
+function showUrlBar(items) {
+  urlLinksEl.innerHTML = "";
+  items.forEach((item, i) => {
+    const { url, title } = normUrl(item);
+    if (!url) return;
+    const row   = document.createElement("div");
+    row.className = "url-link-row";
+    row.dataset.url = url;
+
+    const slot  = document.createElement("span");
+    slot.className = "url-link-slot";
+    slot.textContent = `[${i}]`;
+
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.target   = "_blank";
+    a.rel      = "noopener";
+    a.textContent = title.length > 80 ? title.slice(0, 78) + "…" : title;
+    a.title    = url;
+
+    const st   = document.createElement("span");
+    st.className = "url-link-status";
+    st.textContent = "queued";
+
+    row.appendChild(slot);
+    row.appendChild(a);
+    row.appendChild(st);
+    urlLinksEl.appendChild(row);
+  });
+  urlBarEl.classList.add("visible");
+}
+
+function markUrlStatus(idx, text) {
+  const rows = urlLinksEl.querySelectorAll(".url-link-row");
+  if (rows[idx]) rows[idx].querySelector(".url-link-status").textContent = text;
+}
+
+function hideUrlBar() {
+  urlBarEl.classList.remove("visible");
+  urlLinksEl.innerHTML = "";
+}
+
+// Called when first audio chunk arrives — open via server (positioned
+// Chrome windows) AND mark each link as "opened" in the bar.
+async function openPendingUrls(batch) {
+  if (!batch.length) return;
+
+  // Always show the bar first so links are clickable
+  showUrlBar(batch);
+
+  // Try the launcher server for positioned Chrome windows
+  let serverOk = false;
+  try {
+    const res = await fetch(`${SERVER}/open_tabs`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify(batch.slice(0, 4).map(normUrl)),
+    });
+    serverOk = res.ok;
+  } catch (_) {
+    // server not running (file:// mode or launcher not started)
+  }
+
+  if (serverOk) {
+    batch.slice(0, 4).forEach((_, i) => markUrlStatus(i, "opened ✓"));
+    logChat("sys", `◈ ${batch.length} source(s) opened in positioned windows`);
+  } else {
+    // Server unreachable — links in the bar are still clickable.
+    // window.open() is blocked outside user gestures, so just inform.
+    batch.slice(0, 4).forEach((_, i) => markUrlStatus(i, "click ↗"));
+    logChat("sys", `◈ ${batch.length} source(s) ready — click links above to open`);
+  }
+
+  pendingInfo.textContent = "";
+}
+
+async function closeAllTabs() {
+  pendingUrls = [];
+  pendingInfo.textContent = "";
+  hideUrlBar();
+  try {
+    await fetch(`${SERVER}/close_tabs`, { method: "POST", body: "" });
+  } catch (_) {}
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  MIC  — AudioWorklet (Chrome 66+) with ScriptProcessorNode fallback
+//
+//  AudioWorklet runs off the main thread and is not deprecated.
+//  ScriptProcessorNode fallback kept for Safari/older browsers.
+//  Both paths downsample native rate → 8000 Hz before sending.
+// ═══════════════════════════════════════════════════════════════════
+
+// Inline AudioWorklet processor as a Blob URL
+const _workletSrc = `
+class DownsampleProcessor extends AudioWorkletProcessor {
+  constructor(options) {
+    super();
+    this._ratio  = options.processorOptions.ratio;
+    this._phase  = 0;
+    this._accum  = [];
+    this._chunk  = options.processorOptions.chunkSize;
+  }
+  process(inputs) {
+    const input = inputs[0]?.[0];
+    if (!input) return true;
+    while (this._phase < input.length) {
+      const i0   = Math.floor(this._phase);
+      const i1   = Math.min(i0 + 1, input.length - 1);
+      const frac = this._phase - i0;
+      this._accum.push(input[i0] + frac * (input[i1] - input[i0]));
+      this._phase += this._ratio;
+    }
+    this._phase -= input.length;
+    while (this._accum.length >= this._chunk) {
+      const chunk = new Float32Array(this._accum.splice(0, this._chunk));
+      this.port.postMessage(chunk, [chunk.buffer]);
+    }
+    return true;
+  }
+}
+registerProcessor('downsample-processor', DownsampleProcessor);
+`;
+
+let _workletUrl = null;
+function _getWorkletUrl() {
+  if (!_workletUrl)
+    _workletUrl = URL.createObjectURL(new Blob([_workletSrc], { type: "application/javascript" }));
+  return _workletUrl;
+}
+
+function _sendChunk(chunk) {
+  if (wsConn && wsConn.readyState === WebSocket.OPEN) {
+    wsConn.send(JSON.stringify({ event: "media", media: { payload: float32ToB64(chunk) } }));
+  }
+}
+
+async function startMic() {
+  if (isListening) return;
+
+  if (!window.isSecureContext) {
+    logChat("sys", "◈ MIC ERROR: Requires HTTPS or localhost — not file://");
+    logChat("sys", "◈ Run: python3 -m http.server 8080  then open http://localhost:8080");
+    setStatus("MIC UNAVAILABLE — SERVE VIA HTTP (not file://)");
+    return;
+  }
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    logChat("sys", "◈ MIC ERROR: getUserMedia not supported in this browser/context");
+    setStatus("MIC UNAVAILABLE — USE CHROME/FIREFOX VIA HTTPS");
+    return;
+  }
+
+  try {
+    ensureAudioCtx();
+
+    // Try to resume AudioContext — may still be suspended if no user gesture yet.
+    // The --autoplay-policy=no-user-gesture-required launcher flag bypasses this,
+    // but handle it gracefully here too.
+    if (audioCtx.state === "suspended") {
+      try { await audioCtx.resume(); } catch(_) {}
+    }
+    if (audioCtx.state === "suspended") {
+      _pendingMicStart = true;
+      logChat("sys", "◈ AUDIO BLOCKED — click this window or press any key to activate");
+      setStatus("CLICK HERE / PRESS ANY KEY TO ACTIVATE AUDIO");
+      return;
+    }
+
+    // Always call getUserMedia directly — this is the only call that triggers
+    // the browser mic permission popup. Pre-checking navigator.permissions can
+    // return stale "denied" from a Chrome profile and suppress the popup entirely.
+    logChat("sys", "◈ REQUESTING MIC ACCESS — allow popup if shown...");
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount:1, echoCancellation:true, noiseSuppression:true, autoGainControl:true }
+    });
+    micStream = stream;
+    micSource = audioCtx.createMediaStreamSource(stream);
+
+    micAnalyser = audioCtx.createAnalyser();
+    micAnalyser.fftSize = 256;
+    micSource.connect(micAnalyser);
+
+    const ratio = audioCtx.sampleRate / SAMPLE_IN;
+
+    // ── Try AudioWorklet first (not deprecated, off-main-thread) ──
+    let useWorklet = false;
+    if (audioCtx.audioWorklet) {
+      try {
+        await audioCtx.audioWorklet.addModule(_getWorkletUrl());
+        const workletNode = new AudioWorkletNode(audioCtx, "downsample-processor", {
+          processorOptions: { ratio, chunkSize: CHUNK_SEND }
+        });
+        workletNode.port.onmessage = (e) => {
+          if (isListening) _sendChunk(new Float32Array(e.data));
+        };
+        micSource.connect(workletNode);
+        workletNode.connect(audioCtx.destination);  // must be connected on Mac
+        scriptNode = workletNode;  // store ref for stopMic cleanup
+        useWorklet = true;
+        logChat("sys", "◈ AUDIO ENGINE: AudioWorklet (off-thread)");
+      } catch (we) {
+        logChat("sys", `◈ Worklet failed (${we.message}) — using fallback`);
+      }
+    }
+
+    // ── ScriptProcessorNode fallback ──
+    if (!useWorklet) {
+      const spNode = audioCtx.createScriptProcessor(4096, 1, 1);
+      let phase = 0, accum = [];
+      spNode.onaudioprocess = (e) => {
+        if (!isListening) return;
+        const input = e.inputBuffer.getChannelData(0);
+        while (phase < input.length) {
+          const i0 = Math.floor(phase), i1 = Math.min(i0+1, input.length-1);
+          accum.push(input[i0] + (phase-i0)*(input[i1]-input[i0]));
+          phase += ratio;
+        }
+        phase -= input.length;
+        while (accum.length >= CHUNK_SEND)
+          _sendChunk(new Float32Array(accum.splice(0, CHUNK_SEND)));
+      };
+      micSource.connect(spNode);
+      const silentGain = audioCtx.createGain();
+      silentGain.gain.value = 0;
+      spNode.connect(silentGain);
+      silentGain.connect(audioCtx.destination);
+      scriptNode = spNode;
+      logChat("sys", "◈ AUDIO ENGINE: ScriptProcessorNode (fallback)");
+    }
+
+    isListening = true;
+    logChat("sys", `◈ MIC ACTIVE — native rate ${audioCtx.sampleRate}Hz → downsample ${SAMPLE_IN}Hz`);
+    setStatus("VOICE INPUT ACTIVE — SPEAK NOW");
+    micBtn.classList.add("active");
+    micBtn.textContent = "[ STOP ]";
+    pushState();
+
+  } catch (err) {
+    const name = err.name || "";
+    if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+      logChat("sys", "◈ MIC PERMISSION DENIED — allow microphone in browser");
+      logChat("sys", "◈ Chrome: click 🔒 in address bar → Microphone → Allow, then reload");
+      setStatus("MIC BLOCKED — ALLOW MICROPHONE IN BROWSER SETTINGS");
+    } else if (name === "NotFoundError") {
+      logChat("sys", "◈ MIC NOT FOUND — no microphone device detected");
+      setStatus("MIC UNAVAILABLE — NO MICROPHONE FOUND");
+    } else {
+      logChat("sys", `◈ MIC ERROR [${name}]: ${err.message}`);
+      logChat("sys", `◈ macOS: System Settings → Privacy → Microphone → enable Chrome`);
+      setStatus("MIC UNAVAILABLE — CHECK PERMISSIONS");
+    }
+  }
+}
+
+function stopMic() {
+  isListening = false;
+  dropAudio   = false;
+  micRms      = 0;
+  if (scriptNode)  { scriptNode.disconnect();  scriptNode  = null; }
+  if (micAnalyser) { micAnalyser.disconnect(); micAnalyser = null; }
+  if (micSource)   { micSource.disconnect();   micSource   = null; }
+  if (micStream)   { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+  micBtn.classList.remove("active");
+  micBtn.textContent = "[ MIC ]";
+  setStatus("MIC MUTED — PRESS BUTTON OR [Space] TO REACTIVATE");
+  pushState();
+}
+
+function toggleMic() {
+  ensureAudioCtx();  // need user gesture to resume AudioContext
+  if (isListening) stopMic();
+  else startMic();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  KEYBOARD
+// ═══════════════════════════════════════════════════════════════════
+document.addEventListener("keydown", e => {
+  if (e.code === "Space" && e.target === document.body) {
+    e.preventDefault();
+    toggleMic();
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    if (wsStatus !== "CONNECTED" && wsStatus !== "CONNECTING") {
+      _wsRetries = 0;  // manual retry resets backoff
+      clearTimeout(_wsRetryTimer);
+      connectWs();
+    } else if (isListening) stopMic();
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+//  WAKE WORD  (Web Speech API — mirrors wake_word_listener)
+// ═══════════════════════════════════════════════════════════════════
+function startWakeWord() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    logChat("sys", "◈ WAKE WORD unavailable in this browser — use [Space] to activate mic");
+    return;
+  }
+  wakeRec = new SR();
+  wakeRec.continuous    = true;
+  wakeRec.interimResults = false;
+  wakeRec.lang          = "en-US";
+
+  wakeRec.onresult = (e) => {
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (!e.results[i].isFinal) continue;
+      const txt = e.results[i][0].transcript.toLowerCase().trim();
+      if (WAKE_WORDS.some(w => txt.includes(w))) {
+        logChat("sys", `◈ WAKE WORD — "${txt}"`);
+        if (wsStatus === "CONNECTED" && !isListening) startMic();
+        else if (wsStatus !== "CONNECTED") logChat("sys", "◈ NOT CONNECTED — press Enter to reconnect");
+      }
+    }
+  };
+
+  wakeRec.onerror = (e) => {
+    if (e.error !== "no-speech" && e.error !== "aborted") {
+      logChat("sys", `◈ SPEECH API: ${e.error}`);
+    }
+  };
+
+  wakeRec.onend = () => {
+    // auto-restart unless we're shutting down
+    if (wsStatus !== "OFFLINE" || true) {
+      try { wakeRec.start(); } catch(_) {}
+    }
+  };
+
+  try { wakeRec.start(); } catch(_) {}
+  logChat("sys", "◈ WAKE WORD ACTIVE — listening for: " + WAKE_WORDS.join(" / "));
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  WEBSOCKET  (mirrors on_open / on_message / on_close / on_error)
+// ═══════════════════════════════════════════════════════════════════
+let _wsRetries   = 0;
+let _wsRetryTimer = null;
+const WS_MAX_RETRIES = 5;
+
+function scheduleReconnect() {
+  if (_wsRetries >= WS_MAX_RETRIES) {
+    logChat("sys", `◈ MAX RETRIES (${WS_MAX_RETRIES}) — press Enter to retry manually`);
+    return;
+  }
+  const delay = Math.min(2000 * Math.pow(2, _wsRetries), 30000);
+  _wsRetries++;
+  logChat("sys", `◈ RECONNECT #${_wsRetries} in ${(delay/1000).toFixed(0)}s...`);
+  clearTimeout(_wsRetryTimer);
+  _wsRetryTimer = setTimeout(connectWs, delay);
+}
+
+function connectWs() {
+  if (wsConn && (wsConn.readyState === WebSocket.CONNECTING ||
+                  wsConn.readyState === WebSocket.OPEN)) return;
+
+  clearTimeout(_wsRetryTimer);
+  setWs("CONNECTING");
+  setStatus("ESTABLISHING SECURE CHANNEL...");
+  logChat("sys", `◈ CONNECTING → ${WS_URL}`);
+
+  wsConn = new WebSocket(WS_URL);
+
+  wsConn.onopen = () => {
+    _wsRetries = 0;  // reset backoff on successful connect
+    setWs("CONNECTED");
+    setStatus("SYSTEMS ONLINE — AUTO-STARTING MIC...");
+    logChat("sys", "◈ SECURE CHANNEL ESTABLISHED");
+
+    wsConn.send(JSON.stringify({
+      event:        "start",
+      token:        TOKEN,
+      campId:       CAMP_ID,
+      codec:        "f32_raw",
+      sampleRate:   SAMPLE_IN,
+      asr:          "AZURE",
+      startMessage: true
+    }));
+
+    // auto-start mic after 1.2s — same as terminal
+    setTimeout(startMic, 1200);
+  };
+
+  wsConn.onmessage = (e) => {
+    let msg;
+    try {
+      msg = JSON.parse(typeof e.data === "string"
+        ? e.data
+        : new TextDecoder().decode(e.data));
+    } catch { return; }
+
+    const ev = msg.event || "";
+
+    if (ev === "media") {
+      const p = msg.media?.payload;
+      if (p) enqueueAudio(p);
+
+    } else if (ev === "aiTextStream") {
+      const chunk = msg.text_chunk || "";
+      if (chunk) {
+        const last = chatLines[chatLines.length - 1];
+        if (last && last.role === "ai") {
+          last.text += chunk;
+          lastText = last.text.slice(0, 100);
+          renderChat();
+        } else {
+          logChat("ai", chunk);
+        }
+      }
+
+    } else if (ev === "transcription") {
+      let content = msg.content || "";
+      if (Array.isArray(content)) content = content.join(" ");
+      let role = String(msg.role || "ai").toLowerCase().trim();
+      if      (role.startsWith("user"))                    role = "user";
+      else if (role.startsWith("assistant") || role === "") role = "ai";
+      if (content) logChat(role, content);
+
+    } else if (ev === "clear" || ev === "clearAudio") {
+      stopAudio();
+
+    } else if (ev === "weestream_urls") {
+      const urls  = msg.urls  || [];
+      const qtype = msg.type  || "";
+      for (const u of urls) {
+        const n = normUrl(u);
+        if (n.url && pendingUrls.length < 4 &&
+            !pendingUrls.find(x => normUrl(x).url === n.url))
+          pendingUrls.push(n);
+      }
+      logChat("sys", `◈ ${urls.length} ${qtype} source(s) — opening when audio starts`);
+      // Show the bar immediately so links are visible/clickable right away
+      if (pendingUrls.length) showUrlBar(pendingUrls);
+
+    } else if (ev === "open_tab") {
+      const url   = msg.url   || "";
+      const label = msg.label || url;
+      if (url && pendingUrls.length < 4) {
+        const item = { url, title: label };
+        pendingUrls.push(item);
+        logChat("sys", `◈ OPEN TAB: ${label.slice(0, 60)} — queued`);
+        showUrlBar(pendingUrls);  // refresh bar with all pending
+      }
+
+    } else if (ev === "close_all_tabs") {
+      const types = msg.tab_types || ["all"];
+      logChat("sys", `◈ CLOSE TABS: ${types.join(", ")}`);
+      closeAllTabs();
+
+    } else if (ev === "close") {
+      logChat("sys", "◈ SESSION TERMINATED");
+      setWs("OFFLINE");
+    }
+  };
+
+  wsConn.onclose = (e) => {
+    setWs("OFFLINE");
+    if (isListening) stopMic();
+    const reason = (e.reason || "").toLowerCase();
+    const isAuth = [4001, 4003, 4008, 1008].includes(e.code) ||
+                   ["token","auth","invalid","unauthorized","forbidden"].some(k => reason.includes(k));
+    if (isAuth) {
+      logChat("sys", `◈ AUTH FAILED (code ${e.code}${e.reason ? ": "+e.reason : ""}) — invalid token`);
+      showSetup("API KEY NOT FOUND OR INVALID — UPDATE API KEY");
+    } else if (e.code === 1000 || e.code === 1001) {
+      logChat("sys", `◈ SESSION ENDED (code ${e.code}) — press Enter to reconnect`);
+      setStatus("SESSION ENDED — PRESS ENTER TO RECONNECT");
+    } else {
+      logChat("sys", `◈ CHANNEL LOST (code ${e.code}${e.reason ? ": "+e.reason : ""}) — auto-retry...`);
+      setStatus("CONNECTION LOST — RETRYING...");
+      scheduleReconnect();
+    }
+  };
+
+  wsConn.onerror = (e) => {
+    setWs("ERROR");
+    logChat("sys", `◈ WS ERROR — type:${e.type} url:${WS_URL.slice(0,40)}`);
+    logChat("sys", "◈ Check: token valid? network reachable? VPN blocking WSS?");
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  BOOT SEQUENCE  (mirrors boot_sequence)
+// ═══════════════════════════════════════════════════════════════════
+const BOOT_MSGS = [
+  "INITIALIZING J.A.R.V.I.S  v5.0...",
+  "LOADING NEURAL FRAMEWORK  ▸▸▸  OK",
+  "CALIBRATING VOICE MATRIX  ▸▸▸  OK",
+  "LAUNCHING VISUAL DISPLAY...",
+  "ALL SYSTEMS NOMINAL.",
+];
+
+// ═══════════════════════════════════════════════════════════════════
+//  API KEY SETUP OVERLAY
+// ═══════════════════════════════════════════════════════════════════
+function showSetup(reason) {
+  document.getElementById("setup-overlay").classList.add("visible");
+  document.getElementById("setup-error").textContent = reason || "";
+  setStatus("API KEY REQUIRED — COMPLETE SETUP");
+  setWs("OFFLINE");
+}
+
+function hideSetup() {
+  document.getElementById("setup-overlay").classList.remove("visible");
+}
+
+function setupStep1() {
+  window.open("https://prepodapp.toingg.com", "_blank");
+  document.getElementById("step1-btn").classList.add("done");
+  document.getElementById("step1-btn").textContent = "OPENED ✓";
+}
+
+function setupStep2() {
+  window.open("https://prepodapp.toingg.com/api-keys", "_blank");
+  document.getElementById("step2-btn").classList.add("done");
+  document.getElementById("step2-btn").textContent = "OPENED ✓";
+}
+
+async function setupSave() {
+  const input = document.getElementById("setup-token-input");
+  const errEl = document.getElementById("setup-error");
+  const token = input.value.trim();
+  if (!token) { errEl.textContent = "⚠ Paste your API key first."; return; }
+
+  const btn = document.getElementById("setup-save-btn");
+  btn.textContent = "SAVING...";
+  btn.disabled = true;
+  errEl.textContent = "";
+
+  try {
+    const res = await fetch("/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token })
+    });
+    if (!res.ok) throw new Error(`Server error ${res.status}`);
+    hideSetup();
+    TOKEN = token;
+    logChat("sys", "◈ API KEY SAVED — CONNECTING...");
+    setStatus("API KEY SAVED — CONNECTING...");
+    connectWs();
+  } catch (err) {
+    errEl.textContent = `⚠ ${err.message}`;
+    btn.textContent = "SAVE & CONNECT";
+    btn.disabled = false;
+  }
+}
+
+async function loadConfig() {
+  const res = await fetch("config.json");
+  if (!res.ok) throw new Error(`config.json not found (${res.status})`);
+  const cfg = await res.json();
+  WS_URL  = cfg.WS_URL  || "";
+  TOKEN   = cfg.TOKEN   || "";
+  CAMP_ID = cfg.CAMP_ID || "";
+}
+
+async function boot() {
+  try {
+    await loadConfig();
+  } catch (err) {
+    setStatus("CONFIG ERROR");
+    logChat("sys", `⚠ ${err.message}`);
+    showSetup("config.json not found — check server");
+    return;
+  }
+
+  if (!TOKEN) {
+    showSetup();
+    return;
+  }
+  for (const m of BOOT_MSGS) {
+    setStatus(m);
+    await new Promise(r => setTimeout(r, 400));
+  }
+  if (!window.isSecureContext) {
+    logChat("sys", "⚠ FILE:// DETECTED — mic will not work");
+    logChat("sys", "◈ Fix: python3 -m http.server 8080  →  http://localhost:8080/jarvis_web.html");
+  }
+  connectWs();
+  // Start wake word after connection established
+  setTimeout(startWakeWord, 2500);
+}
+
+boot();
+</script>
+</body>
+</html>

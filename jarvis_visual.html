@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>J.A.R.V.I.S</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:100%; height:100%; background:#000; overflow:hidden; font-family:'Courier New',monospace; }
+  canvas { position:fixed; top:0; left:0; width:100%; height:100%; }
+
+  #ui {
+    position:fixed; top:0; left:0; right:0; bottom:0;
+    display:flex; flex-direction:column;
+    align-items:center; justify-content:center;
+    pointer-events:none;
+  }
+
+  #orb-space { flex:1 1 0; min-height:0; width:100%; }
+
+  #bottom {
+    flex-shrink:0;
+    display:flex; flex-direction:column; align-items:center;
+    gap:6px; padding:10px 16px 14px;
+    width:100%;
+  }
+  #state-label {
+    font-size:9px; letter-spacing:5px;
+    color:rgba(0,180,255,0.4);
+    transition:color 0.6s;
+    min-height:14px;
+  }
+  #text {
+    text-align:center; width:100%;
+    color:rgba(0,180,255,0.9);
+    font-size:12px; line-height:1.5; letter-spacing:0.3px;
+    text-shadow:0 0 18px rgba(0,180,255,0.3);
+    min-height:18px;
+    transition:color 0.6s, text-shadow 0.6s;
+    word-break:break-word;
+  }
+  #dot-row {
+    display:flex; gap:6px; align-items:center; margin-top:2px;
+  }
+  .dot {
+    width:4px; height:4px; border-radius:50%;
+    background:rgba(0,180,255,0.3);
+    transition:background 0.15s, box-shadow 0.15s;
+  }
+
+  #title {
+    position:fixed; top:14px; left:0; right:0;
+    text-align:center;
+    color:rgba(0,180,255,0.3);
+    font-size:8px; letter-spacing:5px; text-transform:uppercase;
+  }
+
+  /* boot progress bar */
+  #boot-bar-wrap {
+    width:60%; max-width:180px;
+    height:2px;
+    background:rgba(255,255,255,0.06);
+    border-radius:2px;
+    overflow:hidden;
+    margin-top:4px;
+    transition:opacity 0.5s;
+  }
+  #boot-bar {
+    height:100%;
+    width:0%;
+    background:rgba(0,180,255,0.6);
+    transition:width 0.5s ease, background 0.6s;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="title">J · A · R · V · I · S &nbsp;◈&nbsp; WEESTREAM</div>
+
+<div id="ui">
+  <div id="orb-space"></div>
+  <div id="bottom">
+    <div id="state-label">INITIALIZING</div>
+    <div id="text">INITIALIZING J.A.R.V.I.S  v5.0...</div>
+    <div id="dot-row">
+      <div class="dot" id="d0"></div>
+      <div class="dot" id="d1"></div>
+      <div class="dot" id="d2"></div>
+      <div class="dot" id="d3"></div>
+      <div class="dot" id="d4"></div>
+    </div>
+    <div id="boot-bar-wrap">
+      <div id="boot-bar"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const canvas  = document.getElementById('c');
+const ctx     = canvas.getContext('2d');
+const textEl  = document.getElementById('text');
+const labelEl = document.getElementById('state-label');
+const dots    = [0,1,2,3,4].map(i => document.getElementById('d'+i));
+const bootBarEl = document.getElementById('boot-bar');
+const bootBarWrap = document.getElementById('boot-bar-wrap');
+
+let W, H, cx, cy, orbR;
+
+function resize() {
+  W = canvas.width  = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  canvas.style.width  = W+'px';
+  canvas.style.height = H+'px';
+  cx   = W / 2;
+  cy   = H * 0.43;
+  orbR = Math.min(W, H) * 0.20;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ── Palette & state labels ────────────────────────────────────────────────
+const PALETTE = {
+  initializing: { r:18,  g:55,  b:120 },
+  idle:         { r:20,  g:110, b:255 },
+  listening:    { r:255, g:55,  b:35  },
+  speaking:     { r:0,   g:200, b:255 },
+};
+const STATE_LABELS = {
+  initializing: 'INITIALIZING',
+  idle:         'STANDBY',
+  listening:    'LISTENING',
+  speaking:     'SPEAKING',
+};
+
+// ── Boot messages (cycle during initializing) ─────────────────────────────
+const BOOT_LINES = [
+  "INITIALIZING J.A.R.V.I.S  v5.0...",
+  "LOADING NEURAL FRAMEWORK  ▸▸▸",
+  "CALIBRATING VOICE MATRIX  ▸▸▸",
+  "ESTABLISHING SECURE CHANNEL...",
+  "AWAITING FIRST TRANSMISSION",
+];
+let bootLineIdx  = 0;
+let bootDotCount = 0;
+let bootProgress = 0;
+let bootTimer    = null;
+let labelTimer   = null;
+let _initDone    = false;   // true once we leave initializing (timeout or first audio)
+
+function startBootAnimation() {
+  if (bootTimer) return;
+  bootBarWrap.style.opacity = '1';
+  // Cycle text lines
+  bootTimer = setInterval(() => {
+    if (curState !== 'initializing') { stopBootAnimation(); return; }
+    bootLineIdx = (bootLineIdx + 1) % BOOT_LINES.length;
+    textEl.textContent = BOOT_LINES[bootLineIdx];
+    bootProgress = Math.min(0.9, bootProgress + 0.18);  // fill but never reach 100% until live
+    bootBarEl.style.width = (bootProgress * 100) + '%';
+  }, 900);
+  // Animate "INITIALIZING···" label dots
+  labelTimer = setInterval(() => {
+    if (curState !== 'initializing') return;
+    bootDotCount = (bootDotCount + 1) % 4;
+    labelEl.textContent = 'INITIALIZING' + '·'.repeat(bootDotCount);
+  }, 350);
+}
+
+function stopBootAnimation() {
+  clearInterval(bootTimer);  bootTimer = null;
+  clearInterval(labelTimer); labelTimer = null;
+}
+
+function flashOnline() {
+  // Brief "SYSTEMS ONLINE" flash then fade to normal state
+  bootBarEl.style.width  = '100%';
+  bootBarEl.style.background = 'rgba(0,230,118,0.8)';
+  textEl.textContent = 'ALL SYSTEMS ONLINE';
+  labelEl.textContent = 'ONLINE';
+  setTimeout(() => {
+    bootBarWrap.style.opacity = '0';
+    bootBarEl.style.background = '';
+  }, 900);
+}
+
+// ── State vars ────────────────────────────────────────────────────────────
+let curState    = 'initializing';
+let curText     = '';
+let targetRGB   = { ...PALETTE.initializing };
+let liveRGB     = { ...PALETTE.initializing };
+let targetScale = 0.82;
+let liveScale   = 0.82;
+let targetEm    = 0.15;
+let liveEm      = 0.15;
+
+// kick off boot animation immediately
+startBootAnimation();
+
+// Hard 4-second timeout — leave initializing regardless of server state
+setTimeout(() => {
+  if (_initDone) return;
+  _initDone = true;
+  stopBootAnimation();
+  curState    = 'idle';
+  targetRGB   = { ...PALETTE.idle };
+  targetScale = 1.0;
+  targetEm    = 0.35;
+  labelEl.textContent       = 'STANDBY';
+  textEl.textContent        = '';
+  bootBarWrap.style.opacity = '0';
+}, 4000);
+
+// ── Poll /state ───────────────────────────────────────────────────────────
+async function poll() {
+  try {
+    const r = await fetch('/state', { cache:'no-store' });
+    const d = await r.json();
+    const raw = d.state || 'idle';
+
+    // First audio = exit initializing with flash
+    if (raw === 'speaking' && !_initDone) {
+      _initDone = true;
+      stopBootAnimation();
+      flashOnline();
+    }
+
+    // While still in init window, only allow speaking/listening through
+    const s = (!_initDone && raw !== 'speaking' && raw !== 'listening')
+      ? 'initializing'
+      : raw;
+
+    if (s !== curState) {
+      curState  = s;
+      targetRGB = { ...PALETTE[s] || PALETTE.idle };
+      if      (s === 'speaking')     { targetScale = 1.55; targetEm = 4.5;  }
+      else if (s === 'listening')    { targetScale = 1.15; targetEm = 2.0;  }
+      else if (s === 'initializing') { targetScale = 0.82; targetEm = 0.15; startBootAnimation(); }
+      else                           { targetScale = 1.0;  targetEm = 0.35; }
+    }
+
+    // Show server text once init is done
+    if (_initDone && d.text !== undefined && d.text !== curText) {
+      curText = d.text;
+      textEl.textContent = curText || '';
+    }
+  } catch (_) {}
+  setTimeout(poll, 80);
+}
+poll();
+
+// ── Wave ring layers ──────────────────────────────────────────────────────
+const LAYERS = [
+  { rs:0.48, freq:3,  amp:0.07, spd:2.0,  ph:0,              al:0.42, lw:2.2 },
+  { rs:0.66, freq:5,  amp:0.09, spd:1.55, ph:Math.PI/3,      al:0.34, lw:1.9 },
+  { rs:0.84, freq:7,  amp:0.11, spd:1.2,  ph:Math.PI*2/3,    al:0.27, lw:1.6 },
+  { rs:1.04, freq:4,  amp:0.08, spd:0.9,  ph:Math.PI,        al:0.18, lw:1.2 },
+  { rs:1.24, freq:9,  amp:0.06, spd:0.6,  ph:Math.PI*4/3,    al:0.11, lw:1.0 },
+];
+const NPTS = 280;
+let t = 0;
+function lerp(a,b,f){ return a+(b-a)*f; }
+
+function drawRing(layer, col, em) {
+  const baseR = orbR * layer.rs * liveScale;
+  const amp   = orbR * layer.amp * em;
+  ctx.beginPath();
+  for (let i = 0; i <= NPTS; i++) {
+    const a = (i/NPTS)*Math.PI*2;
+    const w = Math.sin(layer.freq*a + t*layer.spd + layer.ph)*amp
+            + Math.sin(layer.freq*1.7*a + t*layer.spd*0.6 + layer.ph*1.3)*amp*0.28
+            + Math.sin(layer.freq*3.1*a + t*layer.spd*1.3 + layer.ph*0.7)*amp*0.12;
+    const rr = baseR + w;
+    const x = cx + Math.cos(a)*rr, y = cy + Math.sin(a)*rr;
+    i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+  }
+  ctx.closePath();
+  const g = ctx.createLinearGradient(cx-baseR, cy, cx+baseR, cy);
+  g.addColorStop(0,   `rgba(${col.r},${col.g},${col.b},${layer.al*0.22})`);
+  g.addColorStop(0.5, `rgba(${col.r},${col.g},${col.b},${layer.al})`);
+  g.addColorStop(1,   `rgba(${col.r},${col.g},${col.b},${layer.al*0.22})`);
+  ctx.strokeStyle = g;
+  ctx.lineWidth   = layer.lw;
+  ctx.stroke();
+}
+
+function drawCore(col, em) {
+  const pulse = orbR * 0.25 * liveScale * (1 + Math.sin(t*2.2)*0.07*em);
+  const g0 = ctx.createRadialGradient(cx,cy,0, cx,cy, pulse*4);
+  g0.addColorStop(0,   `rgba(${col.r},${col.g},${col.b},${0.08*em})`);
+  g0.addColorStop(0.5, `rgba(${col.r},${col.g},${col.b},0.02)`);
+  g0.addColorStop(1,   'rgba(0,0,0,0)');
+  ctx.fillStyle = g0; ctx.fillRect(0,0,W,H);
+  const g1 = ctx.createRadialGradient(cx,cy,0, cx,cy, pulse*2);
+  g1.addColorStop(0, `rgba(${col.r},${col.g},${col.b},${0.25*em})`);
+  g1.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.beginPath(); ctx.arc(cx,cy,pulse*2,0,Math.PI*2);
+  ctx.fillStyle = g1; ctx.fill();
+  const g2 = ctx.createRadialGradient(cx-pulse*0.25,cy-pulse*0.25,0, cx,cy,pulse);
+  g2.addColorStop(0,    'rgba(255,255,255,0.95)');
+  g2.addColorStop(0.3,  `rgba(${col.r},${col.g},${col.b},0.85)`);
+  g2.addColorStop(1,    `rgba(${col.r},${col.g},${col.b},0)`);
+  ctx.beginPath(); ctx.arc(cx,cy,pulse,0,Math.PI*2);
+  ctx.fillStyle = g2; ctx.fill();
+}
+
+function drawOrbit(col) {
+  const cnt = 14, r = orbR*1.45*liveScale;
+  for (let i=0; i<cnt; i++) {
+    const a  = (i/cnt)*Math.PI*2 + t*0.28;
+    const x  = cx+Math.cos(a)*r, y = cy+Math.sin(a)*r;
+    const sz = (i%4===0) ? 3 : (i%2===0 ? 1.8 : 1.3);
+    const al = 0.18 + Math.sin(t*1.8+i*0.9)*0.14;
+    ctx.beginPath(); ctx.arc(x,y,sz,0,Math.PI*2);
+    ctx.fillStyle = `rgba(${col.r},${col.g},${col.b},${al})`; ctx.fill();
+  }
+  const cnt2=8, r2=orbR*1.7*liveScale;
+  for (let i=0; i<cnt2; i++) {
+    const a  = (i/cnt2)*Math.PI*2 - t*0.16;
+    const x  = cx+Math.cos(a)*r2, y = cy+Math.sin(a)*r2;
+    const al = 0.10 + Math.sin(t*1.2+i*1.4)*0.07;
+    ctx.beginPath(); ctx.arc(x,y,2,0,Math.PI*2);
+    ctx.fillStyle = `rgba(${col.r},${col.g},${col.b},${al})`; ctx.fill();
+  }
+}
+
+// ── Init-only: radar sweep + horizontal scan ──────────────────────────────
+function drawInitScan(col) {
+  const r = orbR * 1.25 * liveScale;
+
+  // Radar sweep — rotating arc with fading trail
+  ctx.save();
+  ctx.translate(cx, cy);
+  const angle  = t * 0.9;
+  const trail  = Math.PI * 0.55;
+  const steps  = 28;
+  for (let i = 0; i < steps; i++) {
+    const a     = angle - (i / steps) * trail;
+    const alpha = (1 - i / steps) * 0.18;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.arc(0, 0, r, a, a + 0.06);
+    ctx.lineTo(0, 0);
+    ctx.fillStyle = `rgba(${col.r},${col.g},${col.b},${alpha})`;
+    ctx.fill();
+  }
+  // Leading edge
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
+  ctx.strokeStyle = `rgba(${col.r},${col.g},${col.b},0.65)`;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // Leading dot
+  ctx.beginPath();
+  ctx.arc(Math.cos(angle)*r, Math.sin(angle)*r, 3, 0, Math.PI*2);
+  ctx.fillStyle = `rgba(${col.r},${col.g},${col.b},0.9)`;
+  ctx.fill();
+  ctx.restore();
+
+  // Horizontal scan bar drifting up/down
+  const scanY = cy + Math.sin(t * 0.55) * orbR * 0.7;
+  const sg = ctx.createLinearGradient(cx - orbR*1.4, scanY, cx + orbR*1.4, scanY);
+  sg.addColorStop(0,   'rgba(0,0,0,0)');
+  sg.addColorStop(0.25, `rgba(${col.r},${col.g},${col.b},0.07)`);
+  sg.addColorStop(0.5,  `rgba(${col.r},${col.g},${col.b},0.22)`);
+  sg.addColorStop(0.75, `rgba(${col.r},${col.g},${col.b},0.07)`);
+  sg.addColorStop(1,   'rgba(0,0,0,0)');
+  ctx.fillStyle = sg;
+  ctx.fillRect(cx - orbR*1.4, scanY - 1.5, orbR*2.8, 3);
+}
+
+// ── Dot animation ─────────────────────────────────────────────────────────
+let dotPhase = 0;
+function animateDots(col) {
+  dotPhase = (dotPhase + 0.06) % (Math.PI*2);
+  if (curState === 'initializing') {
+    // Sequential loader: one bright dot cycling forward
+    const activeIdx = Math.floor(t * 1.8) % dots.length;
+    dots.forEach((d, i) => {
+      const ahead = (i === (activeIdx + 1) % dots.length);
+      const al    = i === activeIdx ? 0.95 : ahead ? 0.35 : 0.08;
+      d.style.background = `rgba(${col.r},${col.g},${col.b},${al})`;
+      d.style.boxShadow  = i === activeIdx
+        ? `0 0 10px rgba(${col.r},${col.g},${col.b},0.9)`
+        : 'none';
+    });
+  } else {
+    dots.forEach((d, i) => {
+      const ph = dotPhase + i*(Math.PI*2/dots.length);
+      const br = (Math.sin(ph)+1)/2;
+      const al = curState==='idle' ? 0.2+br*0.3 : 0.4+br*0.55;
+      d.style.background = `rgba(${col.r},${col.g},${col.b},${al})`;
+      d.style.boxShadow  = `0 0 ${3+br*6}px rgba(${col.r},${col.g},${col.b},${al})`;
+    });
+  }
+}
+
+// ── UI text/colour update ─────────────────────────────────────────────────
+function setStateUI(col) {
+  const cs = `rgba(${col.r},${col.g},${col.b},`;
+  // Label text is managed by bootAnimation for init; only set here for other states
+  if (curState !== 'initializing') {
+    labelEl.textContent = STATE_LABELS[curState] || 'STANDBY';
+  }
+  labelEl.style.color     = cs+'0.55)';
+  textEl.style.color      = cs+'0.92)';
+  textEl.style.textShadow = `0 0 18px ${cs}0.3)`;
+  dots.forEach((d,i) => {
+    // Box shadow is handled per-state in animateDots — just set colour here as base
+    if (curState !== 'initializing') {
+      d.style.background = cs+(i<3?'0.4)':'0.15)');
+      d.style.boxShadow  = i<3 ? `0 0 6px ${cs}0.6)` : 'none';
+    }
+  });
+}
+
+// ── Frame ─────────────────────────────────────────────────────────────────
+function frame() {
+  ctx.clearRect(0,0,W,H);
+  t += 0.016;
+
+  liveRGB.r   = lerp(liveRGB.r,   targetRGB.r,   0.05);
+  liveRGB.g   = lerp(liveRGB.g,   targetRGB.g,   0.05);
+  liveRGB.b   = lerp(liveRGB.b,   targetRGB.b,   0.05);
+  liveScale   = lerp(liveScale,   targetScale,   0.05);
+  liveEm      = lerp(liveEm,      targetEm,      0.07);
+
+  const col = { r:Math.round(liveRGB.r), g:Math.round(liveRGB.g), b:Math.round(liveRGB.b) };
+
+  const em = (curState === 'idle')
+    ? liveEm * (0.8 + Math.sin(t*0.85)*0.2)
+    : (curState === 'initializing')
+    ? liveEm * (0.7 + Math.sin(t*0.4)*0.3)   // slow breathe during init
+    : liveEm;
+
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
+
+  for (let i=LAYERS.length-1; i>=0; i--) drawRing(LAYERS[i], col, em);
+  drawOrbit(col);
+  if (curState === 'initializing') drawInitScan(col);
+  drawCore(col, em);
+  setStateUI(col);
+  animateDots(col);
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
