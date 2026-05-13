@@ -21,10 +21,13 @@ echo  Python found.
 
 :: ── 2. Install packages if missing ───────────────────────────────────────────
 echo  Checking packages...
-python -c "import pyaudio" >nul 2>&1       || pip install pyaudio -q
-python -c "import numpy" >nul 2>&1         || pip install numpy -q
-python -c "import websocket" >nul 2>&1     || pip install websocket-client -q
-python -c "import rich" >nul 2>&1          || pip install rich -q
+python -c "import pyaudio" >nul 2>&1       || python -m pip install pyaudio -q
+python -c "import numpy" >nul 2>&1         || python -m pip install numpy -q
+python -c "import websocket" >nul 2>&1     || python -m pip install websocket-client -q
+python -c "import rich" >nul 2>&1          || python -m pip install rich -q
+python -c "import speech_recognition" >nul 2>&1 || python -m pip install SpeechRecognition -q
+python -c "import playwright" >nul 2>&1    || python -m pip install playwright -q
+python -m playwright install chromium
 echo  All packages ready.
 echo.
 

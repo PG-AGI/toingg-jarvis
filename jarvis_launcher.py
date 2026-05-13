@@ -20,6 +20,7 @@ import platform as _plat
 _DIR        = os.path.dirname(os.path.abspath(__file__))
 WEB_HTML    = os.path.join(_DIR, "jarvis_web.html")
 VISUAL_HTML = os.path.join(_DIR, "jarvis_visual.html")
+BROWSER_CLIENT = os.path.join(_DIR, "browserClient.py")
 WAKE_WORDS  = ["hey jarvis", "jarvis", "hey jervis", "hey davis"]
 LAUNCH_COOLDOWN = 4.0
 HTTP_PORT   = 8766
@@ -31,9 +32,12 @@ _http_state_lock = threading.Lock()
 # ── SLOT WINDOW CONFIG (mirrors jarvis_terminal.py) ───────────────────────────
 URL_WIN_W  = 860
 URL_WIN_H  = 580
+DESKTOP_PREVIEW_MIN_W = 1280
+DESKTOP_PREVIEW_MIN_H = 800
 _PADDING   = 20
 _url_slot      = 0
 _url_slot_wins = {}
+_url_slot_modes = {}
 _slot_profiles = {}
 
 # ── APP REGISTRY ──────────────────────────────────────────────────────────────
@@ -159,11 +163,42 @@ def _slot_pos(slot):
     y   = min(y, sh - URL_WIN_H - p)
     return max(0, x), max(0, y)
 
-def open_url_in_slot(url, slot):
+def _is_desktop_preview_tab(tab):
+    if not isinstance(tab, dict):
+        return False
+    mode = str(tab.get("windowMode") or tab.get("window_mode") or "").strip().lower()
+    size = str(tab.get("windowSize") or tab.get("window_size") or "").strip().lower()
+    label = str(tab.get("label") or tab.get("title") or "").strip().lower()
+    return mode == "desktop_preview" or size == "large" or label == "campaign dashboard"
+
+def _should_auto_close_tab(tab):
+    if not isinstance(tab, dict):
+        return True
+    label = str(tab.get("label") or tab.get("title") or "").strip().lower()
+    if label == "campaign dashboard":
+        return False
+    auto_close = tab.get("autoClose", tab.get("auto_close", True))
+    return auto_close is not False
+
+def _desktop_preview_geometry():
+    sw, sh = get_screen_size()
+    p = _PADDING
+    w = min(sw - p * 2, max(DESKTOP_PREVIEW_MIN_W, int(sw * 0.92)))
+    h = min(sh - p * 2, max(DESKTOP_PREVIEW_MIN_H, int(sh * 0.88)))
+    x = max(0, (sw - w) // 2)
+    y = max(0, (sh - h) // 2)
+    return w, h, x, y
+
+def open_url_in_slot(url, slot, tab=None):
     """Open url in a specific grid slot; kill previous window in that slot first."""
-    global _url_slot_wins
+    global _url_slot_wins, _url_slot_modes
     chrome  = find_chrome()
-    x, y    = _slot_pos(slot)
+    desktop_preview = _is_desktop_preview_tab(tab)
+    if desktop_preview:
+        win_w, win_h, x, y = _desktop_preview_geometry()
+    else:
+        win_w, win_h = URL_WIN_W, URL_WIN_H
+        x, y = _slot_pos(slot)
     profile = _ensure_profile(slot)
 
     old = _url_slot_wins.get(slot)
@@ -172,6 +207,7 @@ def open_url_in_slot(url, slot):
         except Exception: pass
         time.sleep(0.2)
         _url_slot_wins[slot] = None
+        _url_slot_modes.pop(slot, None)
 
     if chrome:
         args = [
@@ -179,7 +215,7 @@ def open_url_in_slot(url, slot):
             f"--user-data-dir={profile}",
             "--no-first-run",
             "--no-default-browser-check",
-            f"--window-size={URL_WIN_W},{URL_WIN_H}",
+            f"--window-size={win_w},{win_h}",
             f"--window-position={x},{y}",
             url,
         ]
@@ -194,20 +230,39 @@ def open_url_in_slot(url, slot):
             ])
         proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         _url_slot_wins[slot] = proc
+        _url_slot_modes[slot] = "manual" if not _should_auto_close_tab(tab) else "auto"
     else:
         webbrowser.open_new(url)
 
-def close_all_url_windows():
-    global _url_slot_wins
-    for proc in _url_slot_wins.values():
+def close_all_url_windows(auto=False):
+    global _url_slot_wins, _url_slot_modes
+    for slot, proc in list(_url_slot_wins.items()):
+        if auto and _url_slot_modes.get(slot) == "manual":
+            continue
         if proc:
             try: proc.terminate()
             except Exception: pass
-    _url_slot_wins = {}
+        _url_slot_wins.pop(slot, None)
+        _url_slot_modes.pop(slot, None)
 
 # ── JARVIS WINDOWS ────────────────────────────────────────────────────────────
 _visual_proc = None
 _web_proc    = None
+_browser_client_proc = None
+
+def start_browser_client():
+    """Start browserClient.py in the background for browser automation."""
+    global _browser_client_proc
+    if _browser_client_proc and _browser_client_proc.poll() is None:
+        print("  [browser] already running"); return
+    if not os.path.exists(BROWSER_CLIENT):
+        print("  [browser] ⚠  browserClient.py not found"); return
+
+    try:
+        _browser_client_proc = subprocess.Popen([sys.executable, BROWSER_CLIENT], cwd=_DIR)
+        print("  [browser] ✅ browserClient.py started")
+    except Exception as e:
+        print(f"  [browser] ⚠  Failed to start browserClient.py: {e}")
 
 def open_jarvis_visual():
     """Open jarvis_visual.html centered on screen — the main visible window."""
@@ -384,7 +439,7 @@ def start_http_server():
                     for i, tab in enumerate(tabs[:4]):
                         url   = tab.get("url", tab) if isinstance(tab, dict) else str(tab)
                         slot  = i % 4
-                        t     = threading.Thread(target=open_url_in_slot, args=(url, slot), daemon=True)
+                        t     = threading.Thread(target=open_url_in_slot, args=(url, slot, tab), daemon=True)
                         threads.append(t)
                         t.start()
                     _url_slot = len(tabs) % 4
@@ -399,8 +454,16 @@ def start_http_server():
                 self.wfile.write(b'{"ok":true}')
 
             elif self.path == "/close_tabs":
-                close_all_url_windows()
-                print("  [tab] ✅ All slot windows closed")
+                try:
+                    payload = json.loads(body) if body else {}
+                except Exception:
+                    payload = {}
+                auto = bool(payload.get("auto")) if isinstance(payload, dict) else False
+                close_all_url_windows(auto=auto)
+                if auto:
+                    print("  [tab] ✅ Auto-closed grid slot windows")
+                else:
+                    print("  [tab] ✅ All slot windows closed")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self._cors()
@@ -594,9 +657,11 @@ def full_launch(source):
     print(f"\n  🚀  [{source}] JARVIS ACTIVATED\n")
 
     def sequence():
-        print("  [1/2] JARVIS Visual window...")
+        print("  [1/3] Browser automation client...")
+        start_browser_client()
+        print("  [2/3] JARVIS Visual window...")
         open_jarvis_visual()
-        print("  [2/2] JARVIS Web backend (minimized)...")
+        print("  [3/3] JARVIS Web backend (minimized)...")
         open_jarvis_web_bg()
         print("  ✅  Done.\n")
     threading.Thread(target=sequence, daemon=True).start()
@@ -659,7 +724,11 @@ def voice_listener():
             print(f"  [voice] Error: {e}"); time.sleep(1)
 
 # ── API KEY SETUP (terminal prompt) ──────────────────────────────────────────
-_PLACEHOLDER_TOKENS = {"your-token-here", "", "your-api-key-here"}
+_PLACEHOLDER_TOKENS = {"your-token-here", "", "your-api-key-here", "q", "quit", "exit"}
+
+def _is_valid_token(token):
+    token = token.strip() if token else ""
+    return len(token) >= 20 and token.lower() not in _PLACEHOLDER_TOKENS
 
 def _load_token():
     cfg_path = os.path.join(_DIR, "config.json")
@@ -680,6 +749,14 @@ def _save_token(token):
     with open(cfg_path, "w") as f:
         json.dump(cfg, f, indent=2)
 
+def _prompt(text):
+    print(text, end="", flush=True)
+    return input().strip()
+
+def _save_and_continue(token):
+    _save_token(token.strip())
+    print("  ✅  API key saved to config.json — continuing...\n", flush=True)
+
 def _open_url(url):
     try:
         chrome = find_chrome()
@@ -696,7 +773,7 @@ def _open_url(url):
 def check_api_key():
     """If token is missing or placeholder, run interactive setup in the terminal."""
     token = _load_token()
-    if token and token not in _PLACEHOLDER_TOKENS:
+    if _is_valid_token(token):
         return  # token looks valid, continue normally
 
     print("""
@@ -710,41 +787,52 @@ def check_api_key():
     [2]  Open API-key page →  prepodapp.toingg.com/api-keys
     [3]  Paste API key     →  save and continue
     [Q]  Quit
-""")
+
+  Type your choice, then press Enter.
+""", flush=True)
     while True:
         try:
-            choice = input("  Enter choice [1/2/3/Q]: ").strip().upper()
+            choice = _prompt("  Enter choice, or paste API key [1/2/3/Q]: ")
         except (EOFError, KeyboardInterrupt):
             print("\n  Stopped.")
             sys.exit(0)
 
-        if choice == "1":
+        choice_upper = choice.upper()
+        choice_lower = choice.lower()
+
+        if choice_upper == "1":
             _open_url("https://prepodapp.toingg.com")
-            print("  ✅  Signup page opened in browser.\n")
+            print("  ✅  Signup page opened in browser.\n", flush=True)
 
-        elif choice == "2":
+        elif choice_upper == "2":
             _open_url("https://prepodapp.toingg.com/api-keys")
-            print("  ✅  API-key page opened in browser.\n")
+            print("  ✅  API-key page opened in browser.\n", flush=True)
 
-        elif choice == "3":
+        elif choice_upper == "3":
             try:
-                token = input("  Paste API key: ").strip()
+                token = _prompt("  Paste API key, or Q to quit: ")
             except (EOFError, KeyboardInterrupt):
                 print("\n  Stopped.")
                 sys.exit(0)
-            if not token:
-                print("  ⚠   No key entered. Try again.\n")
+            if token.lower() in {"q", "quit", "exit"}:
+                print("  Stopped.")
+                sys.exit(0)
+            if not _is_valid_token(token):
+                print("  ⚠   No valid key entered. Try again.\n", flush=True)
                 continue
-            _save_token(token)
-            print("  ✅  API key saved to config.json — continuing...\n")
+            _save_and_continue(token)
             break
 
-        elif choice == "Q":
+        elif choice_upper == "Q" or choice_lower in {"quit", "exit"}:
             print("  Stopped.")
             sys.exit(0)
 
+        elif _is_valid_token(choice):
+            _save_and_continue(choice)
+            break
+
         else:
-            print("  ⚠   Invalid choice. Enter 1, 2, 3 or Q.\n")
+            print("  ⚠   Invalid choice. Enter 1, 2, 3, Q, or paste your API key.\n", flush=True)
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 def main():

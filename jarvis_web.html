@@ -477,6 +477,8 @@ let micSource     = null;
 let micAnalyser   = null;
 let nextPlayTime  = 0;
 let playScheduled = 0;       // count of scheduled+unfinished buffers
+let playGeneration = 0;      // increments whenever queued playback is flushed
+const activeAudioSources = new Set();
 
 // speech recognition for wake word
 let wakeRec = null;
@@ -814,6 +816,7 @@ function enqueueAudio(b64) {
   buf.copyToChannel(samples, 0);
 
   const src    = audioCtx.createBufferSource();
+  const gen    = playGeneration;
   src.buffer   = buf;
   src.connect(playGain);
 
@@ -822,6 +825,7 @@ function enqueueAudio(b64) {
   nextPlayTime = startAt + samples.length / SAMPLE_OUT;
 
   playScheduled++;
+  activeAudioSources.add(src);
   isPlaying = true;
   pushState();
 
@@ -832,6 +836,8 @@ function enqueueAudio(b64) {
   }
 
   src.onended = () => {
+    activeAudioSources.delete(src);
+    if (gen !== playGeneration) return;
     playScheduled = Math.max(0, playScheduled - 1);
     if (playScheduled === 0) {
       isPlaying = false;
@@ -842,7 +848,11 @@ function enqueueAudio(b64) {
       // Keep the URL bar visible so user can still click links.
       setTimeout(() => {
         if (!isPlaying) {
-          fetch(`${SERVER}/close_tabs`, { method:"POST", body:"" }).catch(()=>{});
+          fetch(`${SERVER}/close_tabs`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ auto: true }),
+          }).catch(()=>{});
         }
       }, 1500);
     }
@@ -850,11 +860,18 @@ function enqueueAudio(b64) {
 }
 
 function stopAudio() {
+  playGeneration++;
   if (audioCtx) nextPlayTime = audioCtx.currentTime;
   playScheduled = 0;
   isPlaying     = false;
   audioRms      = 0;
-  // Recreate gain node so scheduled-but-unplayed buffers are silenced
+  for (const src of activeAudioSources) {
+    try { src.onended = null; } catch (_) {}
+    try { src.stop(0); } catch (_) {}
+    try { src.disconnect(); } catch (_) {}
+  }
+  activeAudioSources.clear();
+  // Recreate gain node after removing all queued playback sources.
   if (playGain) {
     playGain.disconnect();
     playGain     = audioCtx.createGain();
@@ -880,10 +897,26 @@ const SERVER = "http://localhost:8766";
 const urlBarEl    = document.getElementById("url-bar");
 const urlLinksEl  = document.getElementById("url-links");
 
-// Normalise any URL item shape → { url, title }
+function isCampaignDashboardLabel(label) {
+  return String(label || "").trim().toLowerCase() === "campaign dashboard";
+}
+
+// Normalise any URL item shape → { url, title, ...window hints }
 function normUrl(u) {
-  if (typeof u === "string") return { url: u, title: u };
-  return { url: u.url || u.href || "", title: u.title || u.label || u.url || u.href || "" };
+  const item = typeof u === "string"
+    ? { url: u, title: u }
+    : {
+        url: u.url || u.href || "",
+        title: u.title || u.label || u.url || u.href || "",
+        label: u.label || u.title || "",
+        windowMode: u.windowMode || u.window_mode || "",
+        windowSize: u.windowSize || u.window_size || "",
+        autoClose: u.autoClose ?? u.auto_close,
+      };
+  if (isCampaignDashboardLabel(item.label || item.title) ||
+      String(item.windowSize || "").trim().toLowerCase() === "large")
+    item.windowMode = "desktop_preview";
+  return item;
 }
 
 function showUrlBar(items) {
@@ -1227,6 +1260,13 @@ function startWakeWord() {
 let _wsRetries   = 0;
 let _wsRetryTimer = null;
 const WS_MAX_RETRIES = 5;
+const WS_LOG_MEDIA_EVENTS = new Set(["media", "mediastream"]);
+
+function logWsReceived(msg) {
+  const ev = String(msg?.event || "").toLowerCase();
+  if (WS_LOG_MEDIA_EVENTS.has(ev)) return;
+  console.log("[WEESTREAM WS <=]", msg.event || "(no event)", msg);
+}
 
 function scheduleReconnect() {
   if (_wsRetries >= WS_MAX_RETRIES) {
@@ -1264,7 +1304,9 @@ function connectWs() {
       codec:        "f32_raw",
       sampleRate:   SAMPLE_IN,
       asr:          "AZURE",
-      startMessage: true
+      startMessage: true,
+      clearMemory: true,
+      wordsToInterrupt: 2
     }));
 
     // auto-start mic after 1.2s — same as terminal
@@ -1280,6 +1322,7 @@ function connectWs() {
     } catch { return; }
 
     const ev = msg.event || "";
+    logWsReceived(msg);
 
     if (ev === "media") {
       const p = msg.media?.payload;
@@ -1326,7 +1369,7 @@ function connectWs() {
       const url   = msg.url   || "";
       const label = msg.label || url;
       if (url && pendingUrls.length < 4) {
-        const item = { url, title: label };
+        const item = normUrl(msg);
         pendingUrls.push(item);
         logChat("sys", `◈ OPEN TAB: ${label.slice(0, 60)} — queued`);
         showUrlBar(pendingUrls);  // refresh bar with all pending
