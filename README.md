@@ -33,25 +33,54 @@ git clone https://github.com/PG-AGI/toingg-jarvis.git
 cd toingg-jarvis
 ```
 
-### 2. Configure API credentials
+### 2. Configure Toingg API credentials
 
-Copy the example config and fill in your Toingg credentials:
+Create your local config file:
 
 ```bash
 cp config.example.json config.json
 ```
 
-Edit `config.json`:
+For the demo campaign shown in the video, use this campaign ID:
+
+```text
+69d79c72b7ab98a9ef49bcad
+```
+
+Your `config.json` should look like this:
 
 ```json
 {
   "WS_URL": "wss://prepodapi.toingg.com/api/v3/media/streaming",
   "TOKEN": "your_toingg_token_here",
-  "CAMP_ID": "your_campaign_id_here"
+  "CAMP_ID": "69d79c72b7ab98a9ef49bcad"
 }
 ```
 
-> Get your token and campaign ID from your Toingg dashboard.
+Then run the launcher:
+
+```bash
+python3 jarvis_launcher.py
+```
+
+If your API token is missing or invalid, the terminal will show an interactive setup menu:
+
+```text
+[1] Open signup page
+[2] Open API-key page
+[3] Paste API key
+[Q] Quit
+```
+
+Use it like this:
+
+1. Press `1` to open the Toingg signup page.
+2. Press `2` to open the API-key page.
+3. Press `3`, paste your Toingg API key, then press Enter.
+
+The launcher saves the token into `config.json` and continues automatically.
+
+For a custom setup, create your own campaign in Toingg and replace `CAMP_ID` in `config.json` with your campaign ID.
 
 ---
 
