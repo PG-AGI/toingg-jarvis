@@ -1,0 +1,59 @@
+name: Documentation Improvement
+description: Found something unclear, outdated, or missing in the docs?
+title: "[Docs]: "
+labels: ["documentation"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Help us keep the docs sharp!
+        Good documentation is what makes a project truly open-source friendly. Thank you for contributing to it.
+
+  - type: input
+    id: location
+    attributes:
+      label: Affected File or Section
+      description: Which doc file and section needs attention?
+      placeholder: "README.md — macOS Setup section"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: issue_type
+    attributes:
+      label: Type of Issue
+      options:
+        - Missing information
+        - Incorrect / outdated content
+        - Unclear / confusing wording
+        - Broken link
+        - Typo or formatting
+        - Translation needed
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: What's Currently There
+      description: Quote the existing text or describe what you found.
+      placeholder: "The setup guide says to run `pip install requirements.txt` but that command is wrong..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested Fix
+      description: What should it say instead?
+      placeholder: "It should read `pip install -r requirements.txt`..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional Context
+      description: Anything else we should know?

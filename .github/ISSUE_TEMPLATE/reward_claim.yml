@@ -1,0 +1,80 @@
+name: Reward Claim
+description: Reached 1,000 points? Claim your well-earned reward!
+title: "[Reward Claim]: @"
+labels: ["reward-claim"]
+assignees: ["SahilSinha3"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Congratulations on reaching 1,000 points!
+        You've earned it. Fill in the details below and a maintainer will verify your contributions and process your reward within 7 business days.
+
+        > **Minimum threshold:** 1,000 points (= ₹1,000)
+        > See [REWARD_SYSTEM.md](../../REWARD_SYSTEM.md) for full details on how points are calculated.
+
+  - type: input
+    id: github_username
+    attributes:
+      label: Your GitHub Username
+      placeholder: "@your-handle"
+    validations:
+      required: true
+
+  - type: input
+    id: points_claimed
+    attributes:
+      label: Points Being Claimed
+      description: Total points you're redeeming in this claim (minimum 1,000).
+      placeholder: "e.g. 1,250"
+    validations:
+      required: true
+
+  - type: textarea
+    id: contributions
+    attributes:
+      label: Contribution Links
+      description: List all merged PRs, closed issues, or approved tasks that earned these points. One per line.
+      placeholder: |
+        - https://github.com/PG-AGI/toingg-jarvis/pull/12 — Fixed mic input bug on Windows (+100 pts)
+        - https://github.com/PG-AGI/toingg-jarvis/pull/18 — Added Linux setup guide (+200 pts)
+        - https://github.com/PG-AGI/toingg-jarvis/issues/9 — Reported and verified orb freeze bug (+50 pts)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: payment_method
+    attributes:
+      label: Preferred Payment Method
+      options:
+        - UPI (India)
+        - PayPal
+        - Bank Transfer
+        - Other (please specify in additional notes)
+    validations:
+      required: true
+
+  - type: input
+    id: payment_detail
+    attributes:
+      label: Payment Detail
+      description: UPI ID, PayPal email, or other identifier. This is visible to maintainers only — do NOT include passwords or sensitive data.
+      placeholder: "yourname@upi or you@example.com"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      options:
+        - label: I confirm that all listed contributions were merged/accepted by maintainers.
+          required: true
+        - label: I have read and agree to the [Reward System terms](../../REWARD_SYSTEM.md).
+          required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional Notes
+      description: Anything else you'd like to add (preferred currency, alternate contact, etc.)

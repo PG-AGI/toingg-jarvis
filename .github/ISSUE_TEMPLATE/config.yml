@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: GitHub Discussions (General Chat & Ideas)
+    url: https://github.com/PG-AGI/toingg-jarvis/discussions
+    about: For general questions, ideas, and community conversation — use Discussions instead of an issue.
+  - name: Reward System Details
+    url: https://github.com/PG-AGI/toingg-jarvis/blob/main/REWARD_SYSTEM.md
+    about: Learn how to earn and redeem contributor reward points.

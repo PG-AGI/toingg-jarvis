@@ -1,0 +1,61 @@
+name: Feature Request
+description: Got an idea to make Jarvis even smarter? We're listening!
+title: "[Feature]: "
+labels: ["enhancement"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Awesome — let's build something cool!
+        Describe your idea as clearly as possible. The best feature requests explain the *why*, not just the *what*.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the limitation or friction you're running into.
+      placeholder: "I have to manually open Chrome every time before saying a URL command..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: How would you like this to work?
+      placeholder: "Jarvis should auto-launch the browser if it's not already open when a URL command is detected..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any other approaches you thought about?
+      placeholder: "I considered using a system tray icon to keep the browser hot..."
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Feature Area
+      description: Which part of the project does this touch?
+      options:
+        - Voice Recognition / Wake Word
+        - WebSocket / Toingg AI Backend
+        - Browser Automation
+        - App Launcher
+        - Visual UI (Orb / Animations)
+        - Text-to-Speech
+        - Configuration / Setup
+        - Cross-Platform Support
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional Context
+      description: Mockups, screenshots, or links to similar implementations are welcome.
