@@ -165,36 +165,68 @@ def get_active_window_bounds():
     return None
 
 def get_active_screen_bounds():
-    """Return the macOS screen bounds nearest the active window/mouse for Chrome positioning."""
-    if _plat.system() != "Darwin":
+    """Return the bounds (x, y, width, height) of the monitor containing the active window."""
+    plat = _plat.system()
+
+    if plat == "Windows":
+        try:
+            user32 = ctypes.windll.user32
+
+            class _RECT(ctypes.Structure):
+                _fields_ = [
+                    ("left",   ctypes.c_long), ("top",    ctypes.c_long),
+                    ("right",  ctypes.c_long), ("bottom", ctypes.c_long),
+                ]
+
+            class _MONITORINFO(ctypes.Structure):
+                _fields_ = [
+                    ("cbSize",    ctypes.c_ulong),
+                    ("rcMonitor", _RECT),
+                    ("rcWork",    _RECT),
+                    ("dwFlags",   ctypes.c_ulong),
+                ]
+
+            MONITOR_DEFAULTTONEAREST = 2
+            hwnd = user32.GetForegroundWindow()
+            hmon = user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
+            info = _MONITORINFO()
+            info.cbSize = ctypes.sizeof(_MONITORINFO)
+            if user32.GetMonitorInfoW(hmon, ctypes.byref(info)):
+                r = info.rcWork  # work area excludes the taskbar
+                return r.left, r.top, r.right - r.left, r.bottom - r.top
+        except Exception:
+            pass
         return None
-    try:
-        from AppKit import NSEvent, NSScreen
 
-        screens = list(NSScreen.screens())
-        if not screens:
-            return None
+    elif plat == "Darwin":
+        try:
+            from AppKit import NSEvent, NSScreen
 
-        max_y = max(s.frame().origin.y + s.frame().size.height for s in screens)
-        points = []
+            screens = list(NSScreen.screens())
+            if not screens:
+                return None
 
-        active = get_active_window_bounds()
-        if active:
-            ax, ay, aw, ah = active
-            points.append((ax + aw / 2, max_y - (ay + ah / 2)))
+            max_y = max(s.frame().origin.y + s.frame().size.height for s in screens)
+            points = []
 
-        mouse = NSEvent.mouseLocation()
-        points.append((mouse.x, mouse.y))
+            active = get_active_window_bounds()
+            if active:
+                ax, ay, aw, ah = active
+                points.append((ax + aw / 2, max_y - (ay + ah / 2)))
 
-        for px, py in points:
-            for screen in screens:
-                frame = screen.frame()
-                sx, sy = frame.origin.x, frame.origin.y
-                sw, sh = frame.size.width, frame.size.height
-                if sx <= px < sx + sw and sy <= py < sy + sh:
-                    return int(sx), int(max_y - (sy + sh)), int(sw), int(sh)
-    except Exception:
-        pass
+            mouse = NSEvent.mouseLocation()
+            points.append((mouse.x, mouse.y))
+
+            for px, py in points:
+                for screen in screens:
+                    frame = screen.frame()
+                    sx, sy = frame.origin.x, frame.origin.y
+                    sw, sh = frame.size.width, frame.size.height
+                    if sx <= px < sx + sw and sy <= py < sy + sh:
+                        return int(sx), int(max_y - (sy + sh)), int(sw), int(sh)
+        except Exception:
+            pass
+
     return None
 
 def top_center_near_active_window(win_w):
