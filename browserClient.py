@@ -1,5 +1,5 @@
 """
-claudeBot.py — Browser automation client for the Toingg personal AI assistant.
+browserClient.py — Browser automation client for the Toingg personal AI assistant.
 
 Connects to the backend WebSocket, receives Playwright-compatible commands from the LLM,
 executes them in a real browser, and returns results.
@@ -166,18 +166,37 @@ class BrowserClient:
 
     @staticmethod
     def _repair_selector(selector: str) -> str:
-        """Repair common unescaped Tailwind class selectors like button.p-2.5."""
+        """Repair unescaped Tailwind class selectors like button.p-2.5 or button.p-2.5.flex.
+
+        CSS parsers treat 'button.p-2.5' as two classes ('p-2' and '5'), but the Tailwind
+        class is a single token 'p-2.5'. This converts each class to [class~="token"] so
+        multi-class selectors like 'button.p-2.5.flex' become
+        'button[class~="p-2.5"][class~="flex"]' and still match correctly.
+        """
         if "," in selector or " " in selector or "[" in selector or "#" in selector:
             return selector
         parts = selector.split(".")
         if len(parts) <= 2:
             return selector
         tag = parts[0]
-        class_name = ".".join(parts[1:])
-        if not tag or not class_name:
+        if not tag:
             return selector
-        escaped_class = class_name.replace("\\", "\\\\").replace('"', '\\"')
-        return f'{tag}[class~="{escaped_class}"]'
+
+        # Re-merge decimal suffixes: ["p-2", "5"] → "p-2.5"
+        classes: list[str] = []
+        for part in parts[1:]:
+            if not part:
+                continue
+            if classes and part.isdigit():
+                classes[-1] += "." + part
+            else:
+                classes.append(part)
+
+        if not classes:
+            return selector
+
+        escaped = [c.replace("\\", "\\\\").replace('"', '\\"') for c in classes]
+        return tag + "".join(f'[class~="{c}"]' for c in escaped)
 
     @staticmethod
     def _preview_text(value: str | None, limit: int = 120) -> str:
@@ -1182,7 +1201,7 @@ class BrowserClient:
     def _on_message(self, ws, raw: str):
         try:
             msg = json.loads(raw)
-            print("Received: ", msg)
+            log.debug("Received: %s", msg)
         except json.JSONDecodeError:
             return
 
