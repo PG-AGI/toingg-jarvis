@@ -212,3 +212,4 @@ __marimo__/
 
 # Local config (contains secrets)
 config.json
+jarvis_terminal.py
