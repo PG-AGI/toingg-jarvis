@@ -479,6 +479,18 @@ let nextPlayTime  = 0;
 let playScheduled = 0;       // count of scheduled+unfinished buffers
 let playGeneration = 0;      // increments whenever queued playback is flushed
 const activeAudioSources = new Set();
+const BROWSER_ACTION_DELAY_MS = 900;
+const MIN_BROWSER_ACTION_AUDIO_LEAD = 0.45;
+const MAX_BROWSER_ACTION_WAIT_MS = 2200;
+const PLAYBACK_UNDERRUN_LEAD = 0.12;
+const PLAYBACK_IDLE_GRACE_MS = 220;
+let micKeepAliveGain = null;
+let micChunksSent = 0;
+let micChunksDropped = 0;
+let micLastSendAt = 0;
+let micLastNonSilentAt = 0;
+let micLastDebugAt = 0;
+let playbackIdleTimer = null;
 
 // speech recognition for wake word
 let wakeRec = null;
@@ -808,6 +820,10 @@ function ensureAudioCtx() {
 function enqueueAudio(b64) {
   if (dropAudio) return;
   ensureAudioCtx();
+  if (playbackIdleTimer) {
+    clearTimeout(playbackIdleTimer);
+    playbackIdleTimer = null;
+  }
 
   const samples = b64ToFloat32(b64);
   if (!samples.length) return;
@@ -820,7 +836,10 @@ function enqueueAudio(b64) {
   src.buffer   = buf;
   src.connect(playGain);
 
-  const startAt = Math.max(audioCtx.currentTime + 0.01, nextPlayTime);
+  const underrunAt = audioCtx.currentTime + PLAYBACK_UNDERRUN_LEAD;
+  const startAt = nextPlayTime > audioCtx.currentTime
+    ? nextPlayTime
+    : underrunAt;
   src.start(startAt);
   nextPlayTime = startAt + samples.length / SAMPLE_OUT;
 
@@ -829,10 +848,11 @@ function enqueueAudio(b64) {
   isPlaying = true;
   pushState();
 
-  // flush pending URLs on first audio chunk of a response
+  // Flush pending URLs after playback has a little lead. Opening browser
+  // windows on the first chunk can starve the main thread and break speech.
   if (pendingUrls.length > 0) {
     const batch = pendingUrls.splice(0);
-    setTimeout(() => openPendingUrls(batch), 0);
+    schedulePendingUrlOpen(batch, playGeneration);
   }
 
   src.onended = () => {
@@ -840,27 +860,35 @@ function enqueueAudio(b64) {
     if (gen !== playGeneration) return;
     playScheduled = Math.max(0, playScheduled - 1);
     if (playScheduled === 0) {
-      isPlaying = false;
-      audioRms  = 0;
-      pushState();
-      setStatus("STANDING BY — SAY 'HEY JARVIS' TO ACTIVATE");
-      // Close Chrome slot windows 1.5s after audio finishes (matches terminal).
-      // Keep the URL bar visible so user can still click links.
-      setTimeout(() => {
-        if (!isPlaying) {
-          fetch(`${SERVER}/close_tabs`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ auto: true }),
-          }).catch(()=>{});
-        }
-      }, 1500);
+      playbackIdleTimer = setTimeout(() => {
+        playbackIdleTimer = null;
+        if (gen !== playGeneration || playScheduled > 0) return;
+        isPlaying = false;
+        audioRms  = 0;
+        pushState();
+        setStatus("STANDING BY — SAY 'HEY JARVIS' TO ACTIVATE");
+        // Close Chrome slot windows 1.5s after audio finishes (matches terminal).
+        // Keep the URL bar visible so user can still click links.
+        setTimeout(() => {
+          if (!isPlaying) {
+            fetch(`${SERVER}/close_tabs`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ auto: true }),
+            }).catch(()=>{});
+          }
+        }, 1500);
+      }, PLAYBACK_IDLE_GRACE_MS);
     }
   };
 }
 
 function stopAudio() {
   playGeneration++;
+  if (playbackIdleTimer) {
+    clearTimeout(playbackIdleTimer);
+    playbackIdleTimer = null;
+  }
   if (audioCtx) nextPlayTime = audioCtx.currentTime;
   playScheduled = 0;
   isPlaying     = false;
@@ -943,6 +971,13 @@ function showUrlBar(items) {
     st.className = "url-link-status";
     st.textContent = "queued";
 
+    a.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      st.textContent = "opening";
+      const serverOk = await openPositionedWindow(item, i);
+      st.textContent = serverOk ? "opened ✓" : "opened ↗";
+    });
+
     row.appendChild(slot);
     row.appendChild(a);
     row.appendChild(st);
@@ -959,6 +994,54 @@ function markUrlStatus(idx, text) {
 function hideUrlBar() {
   urlBarEl.classList.remove("visible");
   urlLinksEl.innerHTML = "";
+}
+
+function fallbackWindowFeatures(index = 0) {
+  const width  = 860;
+  const height = 580;
+  const gap    = 20;
+  const col    = index % 2;
+  const row    = Math.floor(index / 2);
+  const left   = Math.round(window.screenX + gap + col * (width + gap));
+  const top    = Math.round(window.screenY + gap + row * (height + gap));
+  return `popup=yes,width=${width},height=${height},left=${left},top=${top},noopener`;
+}
+
+async function openPositionedWindow(item, index = 0) {
+  const tab = normUrl(item);
+  if (!tab.url) return false;
+  try {
+    const res = await fetch(`${SERVER}/open_window`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify(tab),
+    });
+    if (res.ok) return true;
+  } catch (_) {
+    // launcher not reachable; fall back to a browser-positioned popup
+  }
+  window.open(tab.url, "_blank", fallbackWindowFeatures(index));
+  return false;
+}
+
+function schedulePendingUrlOpen(batch, generation) {
+  if (!batch.length) return;
+  showUrlBar(batch);
+  const startedAt = performance.now();
+
+  const runWhenBuffered = () => {
+    if (generation !== playGeneration || dropAudio) return;
+    const lead = audioCtx ? nextPlayTime - audioCtx.currentTime : 0;
+    const waitedMs = performance.now() - startedAt;
+    if (lead < MIN_BROWSER_ACTION_AUDIO_LEAD && waitedMs < MAX_BROWSER_ACTION_WAIT_MS) {
+      const waitMs = Math.ceil((MIN_BROWSER_ACTION_AUDIO_LEAD - lead) * 1000);
+      setTimeout(runWhenBuffered, Math.min(350, Math.max(80, waitMs)));
+      return;
+    }
+    openPendingUrls(batch);
+  };
+
+  setTimeout(runWhenBuffered, BROWSER_ACTION_DELAY_MS);
 }
 
 // Called when first audio chunk arrives — open via server (positioned
@@ -1022,9 +1105,11 @@ class DownsampleProcessor extends AudioWorkletProcessor {
     this._accum  = [];
     this._chunk  = options.processorOptions.chunkSize;
   }
-  process(inputs) {
+  process(inputs, outputs) {
     const input = inputs[0]?.[0];
     if (!input) return true;
+    const output = outputs[0]?.[0];
+    if (output) output.set(input.subarray(0, output.length));
     while (this._phase < input.length) {
       const i0   = Math.floor(this._phase);
       const i1   = Math.min(i0 + 1, input.length - 1);
@@ -1051,8 +1136,26 @@ function _getWorkletUrl() {
 }
 
 function _sendChunk(chunk) {
+  const level = rms(chunk);
   if (wsConn && wsConn.readyState === WebSocket.OPEN) {
     wsConn.send(JSON.stringify({ event: "media", media: { payload: float32ToB64(chunk) } }));
+    micChunksSent++;
+    micLastSendAt = performance.now();
+    if (level > 0.003) micLastNonSilentAt = micLastSendAt;
+    if (micLastSendAt - micLastDebugAt > 2500) {
+      micLastDebugAt = micLastSendAt;
+      console.log("[JARVIS MIC =>]", {
+        chunksSent: micChunksSent,
+        chunkSamples: chunk.length,
+        rms: Number(level.toFixed(5)),
+        wsBufferedBytes: wsConn.bufferedAmount
+      });
+    }
+  } else {
+    micChunksDropped++;
+    if (micChunksDropped === 1 || micChunksDropped % 10 === 0) {
+      logChat("sys", `◈ MIC CHUNK DROPPED — websocket not open (${micChunksDropped})`);
+    }
   }
 }
 
@@ -1097,6 +1200,11 @@ async function startMic() {
     });
     micStream = stream;
     micSource = audioCtx.createMediaStreamSource(stream);
+    micChunksSent = 0;
+    micChunksDropped = 0;
+    micLastSendAt = 0;
+    micLastNonSilentAt = 0;
+    micLastDebugAt = 0;
 
     micAnalyser = audioCtx.createAnalyser();
     micAnalyser.fftSize = 256;
@@ -1116,7 +1224,10 @@ async function startMic() {
           if (isListening) _sendChunk(new Float32Array(e.data));
         };
         micSource.connect(workletNode);
-        workletNode.connect(audioCtx.destination);  // must be connected on Mac
+        micKeepAliveGain = audioCtx.createGain();
+        micKeepAliveGain.gain.value = 0;
+        workletNode.connect(micKeepAliveGain);
+        micKeepAliveGain.connect(audioCtx.destination);  // keeps the worklet running on macOS/Chrome
         scriptNode = workletNode;  // store ref for stopMic cleanup
         useWorklet = true;
         logChat("sys", "◈ AUDIO ENGINE: AudioWorklet (off-thread)");
@@ -1142,16 +1253,26 @@ async function startMic() {
           _sendChunk(new Float32Array(accum.splice(0, CHUNK_SEND)));
       };
       micSource.connect(spNode);
-      const silentGain = audioCtx.createGain();
-      silentGain.gain.value = 0;
-      spNode.connect(silentGain);
-      silentGain.connect(audioCtx.destination);
+      micKeepAliveGain = audioCtx.createGain();
+      micKeepAliveGain.gain.value = 0;
+      spNode.connect(micKeepAliveGain);
+      micKeepAliveGain.connect(audioCtx.destination);
       scriptNode = spNode;
       logChat("sys", "◈ AUDIO ENGINE: ScriptProcessorNode (fallback)");
     }
 
     isListening = true;
     logChat("sys", `◈ MIC ACTIVE — native rate ${audioCtx.sampleRate}Hz → downsample ${SAMPLE_IN}Hz`);
+    setTimeout(() => {
+      if (!isListening) return;
+      if (!micChunksSent) {
+        logChat("sys", "◈ MIC WARNING — no audio chunks sent yet; check browser/system mic input");
+      } else if (!micLastNonSilentAt) {
+        logChat("sys", "◈ MIC WARNING — chunks are sending, but input looks silent");
+      } else {
+        logChat("sys", `◈ MIC STREAMING — ${micChunksSent} chunks sent`);
+      }
+    }, 1600);
     setStatus("VOICE INPUT ACTIVE — SPEAK NOW");
     micBtn.classList.add("active");
     micBtn.textContent = "[ STOP ]";
@@ -1179,6 +1300,7 @@ function stopMic() {
   dropAudio   = false;
   micRms      = 0;
   if (scriptNode)  { scriptNode.disconnect();  scriptNode  = null; }
+  if (micKeepAliveGain) { micKeepAliveGain.disconnect(); micKeepAliveGain = null; }
   if (micAnalyser) { micAnalyser.disconnect(); micAnalyser = null; }
   if (micSource)   { micSource.disconnect();   micSource   = null; }
   if (micStream)   { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
@@ -1437,14 +1559,20 @@ function hideSetup() {
   document.getElementById("setup-overlay").classList.remove("visible");
 }
 
-function setupStep1() {
-  window.open("https://prepodapp.toingg.com", "_blank");
+async function setupStep1() {
+  await openPositionedWindow({
+    url: "https://prepodapp.toingg.com",
+    title: "Prepod signup",
+  }, 0);
   document.getElementById("step1-btn").classList.add("done");
   document.getElementById("step1-btn").textContent = "OPENED ✓";
 }
 
-function setupStep2() {
-  window.open("https://prepodapp.toingg.com/api-keys", "_blank");
+async function setupStep2() {
+  await openPositionedWindow({
+    url: "https://prepodapp.toingg.com/api-keys",
+    title: "Prepod API keys",
+  }, 1);
   document.getElementById("step2-btn").classList.add("done");
   document.getElementById("step2-btn").textContent = "OPENED ✓";
 }

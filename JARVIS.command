@@ -55,6 +55,7 @@ python3 -c "import websocket" 2>/dev/null        || pip3 install websocket-clien
 python3 -c "import rich" 2>/dev/null             || pip3 install rich -q --break-system-packages
 python3 -c "import speech_recognition" 2>/dev/null || pip3 install SpeechRecognition -q --break-system-packages
 python3 -c "import playwright" 2>/dev/null       || python3 -m pip install playwright -q --break-system-packages
+python3 -c "import playwright_stealth" 2>/dev/null || python3 -m pip install playwright-stealth -q --break-system-packages
 python3 -m playwright install chromium
 
 echo "✅  All packages ready"

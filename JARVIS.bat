@@ -27,6 +27,7 @@ python -c "import websocket" >nul 2>&1     || python -m pip install websocket-cl
 python -c "import rich" >nul 2>&1          || python -m pip install rich -q
 python -c "import speech_recognition" >nul 2>&1 || python -m pip install SpeechRecognition -q
 python -c "import playwright" >nul 2>&1    || python -m pip install playwright -q
+python -c "import playwright_stealth" >nul 2>&1 || python -m pip install playwright-stealth -q
 python -m playwright install chromium
 echo  All packages ready.
 echo.

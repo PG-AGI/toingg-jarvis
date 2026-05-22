@@ -139,6 +139,90 @@ def get_screen_size():
         pass
     return 1920, 1080
 
+def get_active_window_bounds():
+    """Return the front macOS window bounds as (x, y, width, height), if available."""
+    if _plat.system() != "Darwin":
+        return None
+    script = (
+        'tell application "System Events"\n'
+        '  set frontApp to first application process whose frontmost is true\n'
+        '  set frontWindows to windows of frontApp\n'
+        '  if (count of frontWindows) is 0 then return ""\n'
+        '  set {wx, wy} to position of window 1 of frontApp\n'
+        '  set {ww, wh} to size of window 1 of frontApp\n'
+        '  return (wx as text) & "," & (wy as text) & "," & (ww as text) & "," & (wh as text)\n'
+        'end tell'
+    )
+    try:
+        out = subprocess.check_output(
+            ["osascript", "-e", script], text=True, stderr=subprocess.DEVNULL
+        ).strip()
+        parts = [int(float(p.strip())) for p in out.split(",")]
+        if len(parts) == 4 and parts[2] > 0 and parts[3] > 0:
+            return tuple(parts)
+    except Exception:
+        pass
+    return None
+
+def get_active_screen_bounds():
+    """Return the macOS screen bounds nearest the active window/mouse for Chrome positioning."""
+    if _plat.system() != "Darwin":
+        return None
+    try:
+        from AppKit import NSEvent, NSScreen
+
+        screens = list(NSScreen.screens())
+        if not screens:
+            return None
+
+        max_y = max(s.frame().origin.y + s.frame().size.height for s in screens)
+        points = []
+
+        active = get_active_window_bounds()
+        if active:
+            ax, ay, aw, ah = active
+            points.append((ax + aw / 2, max_y - (ay + ah / 2)))
+
+        mouse = NSEvent.mouseLocation()
+        points.append((mouse.x, mouse.y))
+
+        for px, py in points:
+            for screen in screens:
+                frame = screen.frame()
+                sx, sy = frame.origin.x, frame.origin.y
+                sw, sh = frame.size.width, frame.size.height
+                if sx <= px < sx + sw and sy <= py < sy + sh:
+                    return int(sx), int(max_y - (sy + sh)), int(sw), int(sh)
+    except Exception:
+        pass
+    return None
+
+def top_center_near_active_window(win_w):
+    """Place a window at the top of the same display area as the active app."""
+    screen = get_active_screen_bounds()
+    if screen:
+        sx, sy, sw, _ = screen
+        return sx + max(0, (sw - win_w) // 2), sy + _PADDING
+    active = get_active_window_bounds()
+    if active:
+        ax, ay, aw, _ = active
+        return ax + (aw - win_w) // 2, ay
+    sw, _ = get_screen_size()
+    return max(0, (sw - win_w) // 2), _PADDING
+
+def top_right_near_active_window(win_w):
+    """Place a window near the top-right of the same display area as the active app."""
+    screen = get_active_screen_bounds()
+    if screen:
+        sx, sy, sw, _ = screen
+        return sx + sw - win_w - _PADDING, sy + _PADDING
+    active = get_active_window_bounds()
+    if active:
+        ax, ay, aw, _ = active
+        return ax + aw - win_w - _PADDING, ay
+    sw, _ = get_screen_size()
+    return max(0, sw - win_w - _PADDING), _PADDING
+
 # ── SLOT MANAGER (mirrors jarvis_terminal.py exactly) ────────────────────────
 def _ensure_profile(slot):
     if slot not in _slot_profiles:
@@ -153,15 +237,20 @@ def _slot_pos(slot):
       slot 0 = top-left    slot 1 = top-right
       slot 2 = bottom-left slot 3 = bottom-right
     """
-    sw, sh = get_screen_size()
+    screen = get_active_screen_bounds()
+    if screen:
+        sx, sy, sw, sh = screen
+    else:
+        sx, sy = 0, 0
+        sw, sh = get_screen_size()
     p   = _PADDING
     col = slot % 2
     row = slot // 2
-    x   = p + col * (URL_WIN_W + p)
-    y   = p + row * (URL_WIN_H + p)
-    x   = min(x, sw - URL_WIN_W - p)
-    y   = min(y, sh - URL_WIN_H - p)
-    return max(0, x), max(0, y)
+    x   = sx + p + col * (URL_WIN_W + p)
+    y   = sy + p + row * (URL_WIN_H + p)
+    x   = min(x, sx + sw - URL_WIN_W - p)
+    y   = min(y, sy + sh - URL_WIN_H - p)
+    return x, y
 
 def _is_desktop_preview_tab(tab):
     if not isinstance(tab, dict):
@@ -181,12 +270,17 @@ def _should_auto_close_tab(tab):
     return auto_close is not False
 
 def _desktop_preview_geometry():
-    sw, sh = get_screen_size()
+    screen = get_active_screen_bounds()
+    if screen:
+        sx, sy, sw, sh = screen
+    else:
+        sx, sy = 0, 0
+        sw, sh = get_screen_size()
     p = _PADDING
     w = min(sw - p * 2, max(DESKTOP_PREVIEW_MIN_W, int(sw * 0.92)))
     h = min(sh - p * 2, max(DESKTOP_PREVIEW_MIN_H, int(sh * 0.88)))
-    x = max(0, (sw - w) // 2)
-    y = max(0, (sh - h) // 2)
+    x = sx + max(0, (sw - w) // 2)
+    y = sy + max(0, (sh - h) // 2)
     return w, h, x, y
 
 def open_url_in_slot(url, slot, tab=None):
@@ -265,17 +359,15 @@ def start_browser_client():
         print(f"  [browser] ⚠  Failed to start browserClient.py: {e}")
 
 def open_jarvis_visual():
-    """Open jarvis_visual.html centered on screen — the main visible window."""
+    """Open jarvis_visual.html at the top-center of the screen — the main visible window."""
     global _visual_proc
     if _visual_proc and _visual_proc.poll() is None:
         print("  [visual] already running"); return
 
     url     = f"http://localhost:{HTTP_PORT}/visual"
     chrome  = find_chrome()
-    sw, sh  = get_screen_size()
     win_w, win_h = 420, 520
-    vx = max(0, (sw - win_w) // 2)
-    vy = max(0, (sh - win_h) // 2)
+    vx, vy = top_center_near_active_window(win_w)
     profile = os.path.join(tempfile.gettempdir(), "jarvis_chrome_visual")
     os.makedirs(profile, exist_ok=True)
     if chrome:
@@ -303,17 +395,15 @@ def open_jarvis_visual():
         webbrowser.open(url)
 
 def open_jarvis_web_bg():
-    """Open jarvis_web.html as a small visible window — handles WebSocket + audio."""
+    """Open jarvis_web.html as a small top-right window — handles WebSocket + audio."""
     global _web_proc
     if _web_proc and _web_proc.poll() is None:
         print("  [web] already running"); return
 
     url     = f"http://localhost:{HTTP_PORT}/"
     chrome  = find_chrome()
-    sw, sh  = get_screen_size()
     win_w, win_h = 700, 420
-    wx = max(0, sw - win_w - 20)
-    wy = max(0, sh - win_h - 60)
+    wx, wy = top_right_near_active_window(win_w)
 
     profile = os.path.join(tempfile.gettempdir(), "jarvis_chrome_web")
     os.makedirs(profile, exist_ok=True)
@@ -414,6 +504,7 @@ def start_http_server():
                 self.send_response(404); self.end_headers()
 
         def do_POST(self):
+            global _url_slot
             length = int(self.headers.get("Content-Length", 0))
             body   = self.rfile.read(length) if length else b""
 
@@ -433,20 +524,37 @@ def start_http_server():
             elif self.path == "/open_tabs":
                 try:
                     tabs = json.loads(body) if body else []
-                    close_all_url_windows()
-                    global _url_slot
-                    threads = []
-                    for i, tab in enumerate(tabs[:4]):
-                        url   = tab.get("url", tab) if isinstance(tab, dict) else str(tab)
-                        slot  = i % 4
-                        t     = threading.Thread(target=open_url_in_slot, args=(url, slot, tab), daemon=True)
-                        threads.append(t)
-                        t.start()
-                    _url_slot = len(tabs) % 4
-                    for t in threads: t.join(timeout=0)  # fire-and-forget
-                    print(f"  [tab] ✅ Opened {len(tabs[:4])} tab(s) in grid slots")
+                    tabs = tabs[:4]
+                    def _open_batch():
+                        global _url_slot
+                        close_all_url_windows()
+                        for i, tab in enumerate(tabs):
+                            url  = tab.get("url", tab) if isinstance(tab, dict) else str(tab)
+                            slot = i % 4
+                            open_url_in_slot(url, slot, tab)
+                            time.sleep(0.25)
+                        _url_slot = len(tabs) % 4
+                        print(f"  [tab] ✅ Opened {len(tabs)} tab(s) in grid slots")
+                    threading.Thread(target=_open_batch, daemon=True).start()
                 except Exception as e:
                     print(f"  [tab] ⚠  open_tabs error: {e}")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self._cors()
+                self.end_headers()
+                self.wfile.write(b'{"ok":true}')
+
+            elif self.path == "/open_window":
+                try:
+                    tab = json.loads(body) if body else {}
+                    url = tab.get("url", tab) if isinstance(tab, dict) else str(tab)
+                    if url:
+                        slot = _url_slot % 4
+                        open_url_in_slot(url, slot, tab)
+                        _url_slot = (_url_slot + 1) % 4
+                        print(f"  [tab] ✅ Opened one tab in grid slot {slot}")
+                except Exception as e:
+                    print(f"  [tab] ⚠  open_window error: {e}")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self._cors()

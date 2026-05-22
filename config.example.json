@@ -1,5 +1,5 @@
 {
-  "WS_URL": "wss://your-api-host/api/v3/media/streaming",
+  "WS_URL": "wss://prepodapi.toingg.com/api/v3/media/streaming",
   "TOKEN":  "your-token-here",
   "CAMP_ID": "your-campaign-id-here"
 }
