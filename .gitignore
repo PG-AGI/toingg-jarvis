@@ -3,6 +3,10 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Browser automation profile with cookies/session state
+.browser-profile/
+.browser-profile-test/
+
 # C extensions
 *.so
 
