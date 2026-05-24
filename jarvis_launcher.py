@@ -532,7 +532,7 @@ def start_http_server():
                             url  = tab.get("url", tab) if isinstance(tab, dict) else str(tab)
                             slot = i % 4
                             open_url_in_slot(url, slot, tab)
-                            time.sleep(0.25)
+                            time.sleep(0.4)  # wider stagger reduces overlapping CPU spikes
                         _url_slot = len(tabs) % 4
                         print(f"  [tab] ✅ Opened {len(tabs)} tab(s) in grid slots")
                     threading.Thread(target=_open_batch, daemon=True).start()
@@ -550,8 +550,12 @@ def start_http_server():
                     url = tab.get("url", tab) if isinstance(tab, dict) else str(tab)
                     if url:
                         slot = _url_slot % 4
-                        open_url_in_slot(url, slot, tab)
                         _url_slot = (_url_slot + 1) % 4
+                        # Run in background so the HTTP handler returns immediately
+                        # and doesn't block the audio pipeline while Chrome spawns.
+                        threading.Thread(
+                            target=open_url_in_slot, args=(url, slot, tab), daemon=True
+                        ).start()
                         print(f"  [tab] ✅ Opened one tab in grid slot {slot}")
                 except Exception as e:
                     print(f"  [tab] ⚠  open_window error: {e}")
@@ -567,11 +571,11 @@ def start_http_server():
                 except Exception:
                     payload = {}
                 auto = bool(payload.get("auto")) if isinstance(payload, dict) else False
-                close_all_url_windows(auto=auto)
-                if auto:
-                    print("  [tab] ✅ Auto-closed grid slot windows")
-                else:
-                    print("  [tab] ✅ All slot windows closed")
+                label = "Auto-closed" if auto else "All slot windows closed"
+                threading.Thread(
+                    target=close_all_url_windows, args=(auto,), daemon=True
+                ).start()
+                print(f"  [tab] ✅ {label}")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self._cors()
