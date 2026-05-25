@@ -56,21 +56,56 @@
 
 ## 📖 Table of Contents
 
+- [🔍 Overview](#-overview)
+- [🎯 Target Audience](#-target-audience)
 - [✨ Features](#-features)
+- [📋 Prerequisites](#-prerequisites)
 - [🚀 Quick Start](#-quick-start)
-- [📋 Requirements](#-requirements)
-- [🛠️ Setup](#️-setup)
+- [🛠️ Installation](#️-installation)
+- [⚙️ Environment Setup](#️-environment-setup)
 - [💻 Running JARVIS](#-running-jarvis)
   - [Windows](#windows)
   - [macOS](#macos)
   - [Linux](#linux)
 - [🎮 Usage](#-usage)
-- [⚙️ Configuration](#️-configuration)
+- [📄 Data Requirements](#-data-requirements)
+- [🔧 Configuration](#-configuration)
 - [🗂️ Project Structure](#️-project-structure)
+- [🧠 Methodology](#-methodology)
+- [⚡ Performance](#-performance)
+- [🧪 Testing](#-testing)
 - [🔧 Troubleshooting](#-troubleshooting)
+- [📅 Changelog](#-changelog)
 - [🤝 Contributing](#-contributing)
-- [⭐ Star History](#-star-history)
 - [📜 License](#-license)
+- [📚 Citation](#-citation)
+- [📬 Contact](#-contact)
+- [⭐ Star History](#-star-history)
+
+---
+
+## 🔍 Overview
+
+**J.A.R.V.I.S** (Just A Rather Very Intelligent System) is a free, open-source AI voice terminal that brings natural spoken interaction to your desktop. Say **"Hey Jarvis"** and a real-time conversation begins — your voice streams to the [Toingg](https://toingg.com) AI backend via WebSocket, the AI responds in speech, and supporting browser tabs open automatically in a tidy 2×2 Chrome grid.
+
+The system is built from three cooperating layers:
+
+1. **Wake layer** (`jarvis_launcher.py`) — always-on microphone listener that detects wake words and voice commands, manages a local HTTP server, and launches desktop applications on demand.
+2. **Web layer** (`jarvis_web.html`) — a terminal-style browser UI that handles full-duplex audio (microphone capture + speaker playback) using the Web Audio API and communicates with Toingg over WebSocket.
+3. **Browser automation layer** (`browserClient.py`) — a Playwright-powered client that receives browser commands from the AI backend and executes them in a real Chrome instance with stealth anti-bot patches applied.
+
+All three layers run simultaneously and communicate over `localhost:8766`.
+
+---
+
+## 🎯 Target Audience
+
+| User | Why JARVIS fits |
+|------|----------------|
+| **Developers & makers** | Self-host a local AI voice assistant — no subscription, fully transparent code |
+| **Productivity enthusiasts** | Launch apps, open URLs, and control your desktop entirely by voice |
+| **AI / voice-UI researchers** | A working reference implementation of real-time WebSocket audio streaming + browser automation |
+| **Toingg platform users** | The official showcase for Toingg's streaming voice API |
 
 ---
 
@@ -102,22 +137,48 @@
 
 **🌐 Browser Automation**
 - Opens URLs in a precise 2×2 Chrome grid
-- Playwright-powered browser client
+- Playwright-powered browser client with stealth patches
 - Automatic tab management (open + close)
-- Cross-platform Chrome/Chromium/Edge support
+- Cross-platform Chrome / Chromium / Edge support
 
 </td>
 <td width="50%">
 
 **🚀 App Launcher**
-- Launch Spotify, VS Code, Chrome & more
-- Smart window focus if app already running
+- Launch Spotify, VS Code, Chrome & more by voice
+- Smart window focus if app is already running
 - Custom window size + positioning per app
-- Platform-aware (Mac / Windows paths)
+- Platform-aware paths (Windows / macOS / Linux)
 
 </td>
 </tr>
 </table>
+
+---
+
+## 📋 Prerequisites
+
+### Knowledge
+- Basic comfort with a terminal / command prompt
+- No programming knowledge required to *use* JARVIS; Python familiarity helpful for customisation
+
+### Hardware
+- **Microphone** — any USB or built-in mic; a headset gives the best results
+- **Speakers or headphones** — required for AI audio playback
+- **Internet connection** — needed for Toingg API and Google Speech Recognition
+
+### System compatibility
+
+| OS | Minimum version | Notes |
+|----|----------------|-------|
+| Windows | 10 (64-bit) | Windows 11 recommended |
+| macOS | 10.15 Catalina | M1/M2 fully supported |
+| Linux | Ubuntu 20.04 / Fedora 34 | Requires `portaudio19-dev` |
+
+### Software
+- **Python 3.8+** (`python --version` to check)
+- **Google Chrome**, Chromium, or Microsoft Edge
+- **Toingg account** — free, [sign up here](https://prepodapp.toingg.com)
 
 ---
 
@@ -141,29 +202,7 @@ python3 jarvis_launcher.py
 
 ---
 
-## 📋 Requirements
-
-| Requirement | Details |
-|---|---|
-| **Python** | 3.8 or higher |
-| **Browser** | Google Chrome, Chromium, or Edge |
-| **Toingg account** | Free — [sign up here](https://prepodapp.toingg.com) |
-| **Microphone** | Any — headset recommended for best results |
-
-### Python packages (auto-installed by launchers)
-
-```
-pyaudio           — mic input + audio playback
-numpy             — signal processing
-websocket-client  — WebSocket connection
-rich              — terminal UI
-SpeechRecognition — wake word detection
-playwright        — browser automation
-```
-
----
-
-## 🛠️ Setup
+## 🛠️ Installation
 
 ### 1. Clone the repository
 
@@ -172,23 +211,88 @@ git clone https://github.com/PG-AGI/toingg-jarvis.git
 cd toingg-jarvis
 ```
 
-### 2. Configure your Toingg credentials
+### 2. Install Python dependencies
+
+```bash
+pip install pyaudio numpy websocket-client rich SpeechRecognition playwright playwright-stealth
+python -m playwright install chromium
+```
+
+> ⚠️ **Windows — PyAudio failing?** Run: `pip install pipwin && pipwin install pyaudio`
+>
+> ⚠️ **macOS** — install PortAudio first: `brew install portaudio`
+>
+> ⚠️ **Linux** — install system audio libs first: `sudo apt install portaudio19-dev`
+
+### 3. Configure credentials
 
 ```bash
 cp config.example.json config.json
 ```
 
-Edit `config.json`:
+Edit `config.json` with your Toingg token (see [Data Requirements](#-data-requirements)).
 
-```json
-{
-  "WS_URL": "wss://prepodapi.toingg.com/api/v3/media/streaming",
-  "TOKEN": "your_toingg_token_here",
-  "CAMP_ID": "69d79c72b7ab98a9ef49bcad"
-}
+---
+
+## ⚙️ Environment Setup
+
+### Python packages
+
+| Package | Purpose |
+|---------|---------|
+| `pyaudio` | Microphone input for wake-word detection |
+| `numpy` | Audio signal processing |
+| `websocket-client` | WebSocket connection to Toingg backend |
+| `rich` | Terminal UI formatting |
+| `SpeechRecognition` | Google Speech API for wake-word detection |
+| `playwright` | Browser automation (Chromium) |
+| `playwright-stealth` | Anti-bot-detection patches for Playwright |
+
+### Platform-specific setup
+
+<details>
+<summary><b>Windows</b></summary>
+
+No extra setup required — `JARVIS.bat` installs everything automatically on first run.
+
+For manual installs, PyAudio requires a compiled binary:
+```cmd
+pip install pipwin
+pipwin install pyaudio
+```
+</details>
+
+<details>
+<summary><b>macOS</b></summary>
+
+Run the one-time permission fixer before first launch:
+```bash
+bash setup_mac.sh
 ```
 
-> 🆓 Use campaign ID `69d79c72b7ab98a9ef49bcad` for the **free demo campaign** shown in the preview.
+This grants execute permissions to `JARVIS.command` and requests Microphone + Accessibility access.
+
+PortAudio must be installed via Homebrew:
+```bash
+brew install portaudio
+```
+</details>
+
+<details>
+<summary><b>Linux</b></summary>
+
+Install system audio libraries:
+```bash
+# Debian/Ubuntu
+sudo apt update && sudo apt install portaudio19-dev python3-pyaudio
+
+# Fedora/RHEL
+sudo dnf install portaudio-devel
+
+# Add user to audio group if mic is not detected
+sudo usermod -aG audio $USER  # log out and back in after this
+```
+</details>
 
 ---
 
@@ -203,12 +307,10 @@ Double-click **`JARVIS.bat`** — it auto-installs everything and launches.
 **Option B — Manual**
 
 ```cmd
-pip install pyaudio numpy websocket-client rich SpeechRecognition playwright
+pip install pyaudio numpy websocket-client rich SpeechRecognition playwright playwright-stealth
 python -m playwright install chromium
 python jarvis_launcher.py
 ```
-
-> ⚠️ PyAudio failing? Run: `pip install pipwin && pipwin install pyaudio`
 
 ---
 
@@ -217,7 +319,7 @@ python jarvis_launcher.py
 **Option A — Double-click (recommended)**
 
 ```bash
-# First time only — fix permissions
+# First time only
 bash setup_mac.sh
 ```
 
@@ -227,7 +329,7 @@ Then double-click **`JARVIS.command`** anytime.
 
 ```bash
 brew install portaudio
-pip3 install pyaudio numpy websocket-client rich SpeechRecognition playwright --break-system-packages
+pip3 install pyaudio numpy websocket-client rich SpeechRecognition playwright playwright-stealth --break-system-packages
 python3 -m playwright install chromium
 python3 jarvis_launcher.py
 ```
@@ -246,7 +348,7 @@ sudo apt update && sudo apt install portaudio19-dev python3-pyaudio
 sudo dnf install portaudio-devel
 
 # Python packages
-pip3 install pyaudio numpy websocket-client rich SpeechRecognition playwright
+pip3 install pyaudio numpy websocket-client rich SpeechRecognition playwright playwright-stealth
 python3 -m playwright install chromium
 
 # Add user to audio group (if mic not detected)
@@ -263,28 +365,59 @@ python3 jarvis_launcher.py
 | Action | Result |
 |--------|--------|
 | Say **"Hey Jarvis"** | Activates the terminal & visual UI |
-| **Press [Space] / [Enter]** | Toggle microphone manually |
+| **Press [Space] / [Enter]** in web UI | Toggle microphone manually |
 | **Speak naturally** | Streams audio to Toingg AI, plays response |
 | Say **"open Spotify"** | Launches Spotify |
 | Say **"open Chrome"** | Launches Chrome |
 | Say **"open VS Code"** | Launches Visual Studio Code |
-| **Ctrl+C** | Exit JARVIS |
+| **Ctrl+C** in terminal | Exit JARVIS |
 
 When JARVIS fetches news, weather, or web results — Chrome windows open automatically in a **2×2 grid** and close after the response finishes.
 
 ---
 
-## ⚙️ Configuration
+## 📄 Data Requirements
 
-Key settings at the top of each script:
+JARVIS requires a `config.json` file at the project root. Copy the template and fill in your credentials:
+
+```bash
+cp config.example.json config.json
+```
+
+```json
+{
+  "WS_URL": "wss://prepodapi.toingg.com/api/v3/media/streaming",
+  "TOKEN": "your_toingg_api_token_here",
+  "CAMP_ID": "69d79c72b7ab98a9ef49bcad"
+}
+```
+
+| Field | Description | How to get |
+|-------|-------------|-----------|
+| `WS_URL` | Toingg WebSocket endpoint | Leave as-is (default endpoint) |
+| `TOKEN` | Your personal Toingg API token | [prepodapp.toingg.com/api-keys](https://prepodapp.toingg.com/api-keys) |
+| `CAMP_ID` | Campaign / agent ID | Use the default for the free demo, or create your own campaign |
+
+> 🆓 The default campaign ID `69d79c72b7ab98a9ef49bcad` is the **free JARVIS demo** shown in the preview video — no setup required beyond your API token.
+
+> 🔒 `config.json` is listed in `.gitignore` and will never be committed to version control.
+
+---
+
+## 🔧 Configuration
+
+Key settings in the source files:
 
 | Setting | File | Default | Description |
 |---------|------|---------|-------------|
-| `MIC_ENERGY_THRESHOLD` | `jarvis_terminal.py` | `600` | Mic sensitivity (100 = very sensitive, 4000 = noise-resistant) |
-| `MIC_PAUSE_THRESHOLD` | `jarvis_terminal.py` | `1.2` | Silence (seconds) before phrase ends |
-| `BARGE_IN_PAUSE` | `jarvis_terminal.py` | `0.4` | Interrupt AI while it's speaking |
-| `WAKE_WORDS` | `jarvis_launcher.py` | `["hey jarvis", ...]` | Trigger phrases |
-| `HTTP_PORT` | both | `8766` | Local server port |
+| `WAKE_WORDS` | `jarvis_launcher.py` | `["hey jarvis", "jarvis", ...]` | Phrases that trigger full launch |
+| `LAUNCH_COOLDOWN` | `jarvis_launcher.py` | `4.0` s | Minimum seconds between consecutive launches |
+| `HTTP_PORT` | `jarvis_launcher.py` | `8766` | Local server port |
+| `energy_threshold` | `jarvis_launcher.py` | `400` | Mic sensitivity (lower = more sensitive) |
+| `pause_threshold` | `jarvis_launcher.py` | `1.2` s | Silence duration before phrase ends |
+| `BROWSER_ACTION_DELAY_MS` | `jarvis_web.html` | `900` ms | Delay before first browser tab opens after audio starts |
+| `MIN_BROWSER_ACTION_AUDIO_LEAD` | `jarvis_web.html` | `0.65` s | Minimum audio buffer lead before spawning Chrome |
+| `PLAYBACK_IDLE_GRACE_MS` | `jarvis_web.html` | `220` ms | Grace period after last audio chunk before marking idle |
 
 ---
 
@@ -292,16 +425,104 @@ Key settings at the top of each script:
 
 ```
 toingg-jarvis/
-├── 🐍 jarvis_launcher.py     # Wake-word listener, app launcher, HTTP server
-├── 🐍 jarvis_terminal.py     # Terminal UI, WebSocket, mic input, audio engine
+├── 🐍 jarvis_launcher.py     # Wake-word listener, app launcher, HTTP server (:8766)
 ├── 🐍 browserClient.py       # Playwright browser automation client
-├── 🌐 jarvis_web.html         # Web frontend (served at localhost:8766)
+├── 🌐 jarvis_web.html         # Web frontend — WebSocket audio, terminal UI
 ├── 🎨 jarvis_visual.html      # Animated orb / visual display
-├── 🖥️  JARVIS.bat              # Windows launcher script
-├── 🍎 JARVIS.command          # macOS launcher script
-├── 🔧 setup_mac.sh            # Mac one-time permission fixer
-├── 📄 config.json             # API credentials (create from example)
+├── 🖥️  JARVIS.bat              # Windows auto-installer & launcher
+├── 🍎 JARVIS.command          # macOS auto-installer & launcher
+├── 🔧 setup_mac.sh            # macOS one-time permission fixer
+├── 📄 config.json             # API credentials (create from example, not committed)
 └── 📄 config.example.json     # Config template
+```
+
+---
+
+## 🧠 Methodology
+
+JARVIS is composed of three cooperating processes that communicate over `localhost:8766`:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  User speaks                                                │
+│       │                                                     │
+│  [Wake layer — jarvis_launcher.py]                          │
+│   SpeechRecognition (Google Speech API, 16 kHz)             │
+│   Detects "Hey Jarvis" → spawns browser client              │
+│   Opens jarvis_web.html + jarvis_visual.html in Chrome      │
+│       │                                                     │
+│  [Web layer — jarvis_web.html]                              │
+│   Web Audio API captures mic → 8 kHz Float32 chunks         │
+│   AudioWorklet (off-main-thread) downsamples in real time   │
+│   Base64 chunks → WebSocket → Toingg streaming API          │
+│   Toingg responses → decoded Float32 → Web Audio playback   │
+│   Animated spectrum visualiser reacts to RMS levels         │
+│   URL events from Toingg → queued until audio has 0.65s lead│
+│       │                                                     │
+│  [Browser layer — browserClient.py]                         │
+│   Playwright persistent Chromium context                    │
+│   Stealth patches (navigator, WebGL, plugins, permissions)  │
+│   Receives JSON action commands via WebSocket               │
+│   Executes: navigate, click, fill, get_text, screenshot…    │
+│   Returns results as JSON to Toingg backend                 │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Audio pipeline detail:**
+- Microphone is captured at the browser's native sample rate (typically 44.1 kHz or 48 kHz)
+- An `AudioWorkletProcessor` running off the main thread downsamples to 8,000 Hz (Toingg's expected input rate) using a linear interpolation decimator
+- Chunks of 512 samples are base64-encoded and sent as WebSocket binary-text frames
+- Incoming audio from Toingg arrives as base64-encoded Float32 arrays at 24,000 Hz
+- Playback is scheduled ahead-of-time using `AudioBufferSourceNode.start(scheduledTime)` to prevent underruns
+
+**Browser automation detail:**
+- `browserClient.py` uses `playwright_stealth` to patch fingerprint leaks (WebGL vendor/renderer, `navigator.plugins`, `navigator.webdriver`, permissions API)
+- A persistent Chromium profile in `.browser-profile/` preserves cookies and sessions across restarts
+- The `_click_element` method uses a scored text-matching algorithm in `page.evaluate()` to find the best DOM target, then uses a `data-*` marker attribute to safely re-locate it via Playwright's locator API
+
+---
+
+## ⚡ Performance
+
+| Metric | Expected value | Notes |
+|--------|---------------|-------|
+| Wake-word latency | 1–3 s | Depends on Google Speech API round-trip |
+| Audio stream start | < 500 ms after wake | After Chrome windows open |
+| First AI audio chunk | 1–3 s | Depends on Toingg API latency |
+| Browser tab open | 0.5–2 s per tab | Chrome spawn time varies by machine |
+| CPU at idle (wake listener) | < 2% | SpeechRecognition daemon thread |
+| CPU during tab opens | 20–60% spike | Chrome process creation; staggered 400 ms apart |
+| Memory (full session) | 300–600 MB | 2 Chrome instances + Playwright Chromium |
+
+**Reducing latency tips:**
+- Use a wired headset to minimise mic input noise and false triggers
+- Keep Chrome already running — subsequent launches use existing profiles and start faster
+- On slower machines, reduce `LAUNCH_COOLDOWN` only if you frequently re-trigger JARVIS
+
+---
+
+## 🧪 Testing
+
+There is currently no automated test suite. Contributions adding unit or integration tests are **very welcome** and carry bonus reward points (see [REWARD_SYSTEM.md](REWARD_SYSTEM.md)).
+
+**Manual smoke-test checklist:**
+
+```
+[ ] python3 jarvis_launcher.py starts without errors
+[ ] HTTP server responds: curl http://localhost:8766/state
+[ ] Say "Hey Jarvis" — visual orb and web panel open in Chrome
+[ ] Speak a question — audio response plays cleanly
+[ ] Chrome tab grid opens and closes with the response
+[ ] Say "open Spotify" — Spotify launches (or focuses if already open)
+[ ] Ctrl+C cleanly stops the process
+```
+
+**Verifying the browser client:**
+
+```bash
+python3 browserClient.py --url wss://prepodapi.toingg.com/api/v3/media/browser/default
+# Should print: Browser launched (headless=False, profile=.browser-profile)
+# Then: WebSocket opened
 ```
 
 ---
@@ -336,6 +557,7 @@ sudo apt install portaudio19-dev && pip3 install pyaudio
 
 - Ensure Google Chrome is installed at its default path
 - On Linux: `google-chrome` or `chromium-browser` must be in your `$PATH`
+- On Windows: Edge is used as a fallback if Chrome is not found
 </details>
 
 <details>
@@ -343,7 +565,7 @@ sudo apt install portaudio19-dev && pip3 install pyaudio
 
 - Verify `TOKEN` and `CAMP_ID` in `config.json`
 - Check your internet connection
-- Confirm no VPN is blocking WSS connections
+- Confirm no VPN is blocking WSS connections to `prepodapi.toingg.com`
 </details>
 
 <details>
@@ -351,7 +573,34 @@ sudo apt install portaudio19-dev && pip3 install pyaudio
 
 - Check your default output device in system sound settings
 - Try a different browser for the web frontend
+- On macOS, run `bash setup_mac.sh` to ensure microphone permissions are granted
 </details>
+
+<details>
+<summary><b>🔴 Voice listener not responding after first activation</b></summary>
+
+- This can happen if JARVIS was launched by double-clicking (no terminal attached)
+- Upgrade to the latest version — this is fixed in v2.0.1+
+</details>
+
+---
+
+## 📅 Changelog
+
+### v2.0 (current)
+- Replaced `jarvis_terminal.py` with `jarvis_web.html` — full browser-based audio engine using Web Audio API
+- Added `browserClient.py` — Playwright browser automation with stealth patches
+- 2×2 Chrome window grid for source URLs
+- Multi-platform Chrome detection (Chrome / Chromium / Edge)
+- Animated visual orb (`jarvis_visual.html`) separated from audio logic
+- Interactive API key setup flow in terminal
+- macOS multi-monitor support via AppKit
+
+### v1.0
+- Initial release — terminal-based voice interface
+- Wake-word detection with Google Speech API
+- Toingg WebSocket audio streaming
+- Basic app launcher (Spotify, VS Code, Chrome)
 
 ---
 
@@ -367,6 +616,42 @@ Contributions are welcome! Here's how:
 
 Please check [open issues](https://github.com/PG-AGI/toingg-jarvis/issues) before starting — something you want may already be in progress!
 
+> 💰 **Earn rewards for your contributions** — see [REWARD_SYSTEM.md](REWARD_SYSTEM.md) for the full points table. First-time contributors earn a **1.5× bonus multiplier**.
+
+---
+
+## 📜 License
+
+Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for more information.
+
+---
+
+## 📚 Citation
+
+If you use JARVIS in research or reference it in a publication, please cite:
+
+```bibtex
+@software{jarvis_toingg_2025,
+  author  = {PG-AGI},
+  title   = {J.A.R.V.I.S — AI Voice Terminal powered by Toingg},
+  year    = {2025},
+  url     = {https://github.com/PG-AGI/toingg-jarvis},
+  license = {MIT}
+}
+```
+
+---
+
+## 📬 Contact
+
+| Channel | Link |
+|---------|------|
+| **GitHub Issues** | [Report a bug or request a feature](https://github.com/PG-AGI/toingg-jarvis/issues) |
+| **GitHub Discussions** | [Community Q&A and rewards](https://github.com/PG-AGI/toingg-jarvis/discussions) |
+| **Maintainer email** | admin@pgagi.in |
+| **Toingg platform** | [toingg.com](https://toingg.com) |
+| **X / Twitter** | [@PG_AGI](https://x.com/vivekjyotibhow1) |
+
 ---
 
 ## ⭐ Star History
@@ -376,12 +661,6 @@ Please check [open issues](https://github.com/PG-AGI/toingg-jarvis/issues) befor
 [![Star History Chart](https://api.star-history.com/svg?repos=PG-AGI/toingg-jarvis&type=Date&theme=dark)](https://star-history.com/#PG-AGI/toingg-jarvis&Date)
 
 </div>
-
----
-
-## 📜 License
-
-Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for more information.
 
 ---
 
