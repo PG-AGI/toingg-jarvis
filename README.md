@@ -198,6 +198,16 @@ python3 jarvis_launcher.py
 # Then say: "Hey Jarvis"
 ```
 
+Optional window-placement settings can be passed from the terminal:
+
+```bash
+python3 jarvis_launcher.py \
+  --url-window-size 1600x900 \
+  --desktop-preview-size 1800x1000 \
+  --window-position center \
+  --window-padding 24
+```
+
 > 💡 No API key yet? The launcher will walk you through getting one interactively.
 
 ---
@@ -413,6 +423,11 @@ Key settings in the source files:
 | `WAKE_WORDS` | `jarvis_launcher.py` | `["hey jarvis", "jarvis", ...]` | Phrases that trigger full launch |
 | `LAUNCH_COOLDOWN` | `jarvis_launcher.py` | `4.0` s | Minimum seconds between consecutive launches |
 | `HTTP_PORT` | `jarvis_launcher.py` | `8766` | Local server port |
+| `JARVIS_URL_WINDOW_SIZE` | env / CLI | `860x580` | Size for browser grid windows (`--url-window-size`) |
+| `JARVIS_DESKTOP_PREVIEW_SIZE` | env / CLI | `1280x800` | Minimum desktop preview size (`--desktop-preview-size`) |
+| `JARVIS_WINDOW_POSITION` | env / CLI | `auto` | Window grid anchor: `auto`, `top-left`, `top-right`, `center`, or `custom` (`--window-position`) |
+| `JARVIS_WINDOW_COORDINATES` | env / CLI | unset | Exact `X,Y` origin for custom placement (`--window-coordinates`) |
+| `JARVIS_WINDOW_PADDING` | env / CLI | `20` | Gap around and between spawned windows (`--window-padding`) |
 | `energy_threshold` | `jarvis_launcher.py` | `400` | Mic sensitivity (lower = more sensitive) |
 | `pause_threshold` | `jarvis_launcher.py` | `1.2` s | Silence duration before phrase ends |
 | `BROWSER_ACTION_DELAY_MS` | `jarvis_web.html` | `900` ms | Delay before first browser tab opens after audio starts |

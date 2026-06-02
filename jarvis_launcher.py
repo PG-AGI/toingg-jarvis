@@ -12,7 +12,7 @@ Requirements:
     pip install sounddevice numpy speechrecognition
 """
 
-import os, sys, time, threading, subprocess, tempfile, json, webbrowser
+import argparse, os, sys, time, threading, subprocess, tempfile, json, webbrowser
 import ctypes, ctypes.wintypes
 import platform as _plat
 
@@ -35,10 +35,85 @@ URL_WIN_H  = 580
 DESKTOP_PREVIEW_MIN_W = 1280
 DESKTOP_PREVIEW_MIN_H = 800
 _PADDING   = 20
+WINDOW_POSITION = "auto"
+WINDOW_COORDS = None
 _url_slot      = 0
 _url_slot_wins = {}
 _url_slot_modes = {}
 _slot_profiles = {}
+
+def _parse_size(value, fallback):
+    if not value:
+        return fallback
+    try:
+        width, height = str(value).lower().split("x", 1)
+        width, height = int(width), int(height)
+        if width <= 0 or height <= 0:
+            raise ValueError
+        return width, height
+    except ValueError:
+        print(f"  [config] ⚠  Invalid size '{value}', expected WIDTHxHEIGHT")
+        return fallback
+
+def _parse_coords(value):
+    if not value:
+        return None
+    try:
+        x, y = str(value).split(",", 1)
+        return int(x), int(y)
+    except ValueError:
+        print(f"  [config] ⚠  Invalid coordinates '{value}', expected X,Y")
+        return None
+
+def apply_runtime_config(argv=None):
+    """Apply window placement settings from env vars and terminal arguments."""
+    global URL_WIN_W, URL_WIN_H, DESKTOP_PREVIEW_MIN_W, DESKTOP_PREVIEW_MIN_H
+    global _PADDING, WINDOW_POSITION, WINDOW_COORDS
+
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--url-window-size")
+    parser.add_argument("--desktop-preview-size")
+    parser.add_argument("--window-padding", type=int)
+    parser.add_argument(
+        "--window-position",
+        choices=["auto", "top-left", "top-right", "center", "custom"],
+    )
+    parser.add_argument("--window-coordinates")
+
+    args, _ = parser.parse_known_args(argv)
+
+    URL_WIN_W, URL_WIN_H = _parse_size(
+        args.url_window_size or os.environ.get("JARVIS_URL_WINDOW_SIZE"),
+        (URL_WIN_W, URL_WIN_H),
+    )
+    DESKTOP_PREVIEW_MIN_W, DESKTOP_PREVIEW_MIN_H = _parse_size(
+        args.desktop_preview_size or os.environ.get("JARVIS_DESKTOP_PREVIEW_SIZE"),
+        (DESKTOP_PREVIEW_MIN_W, DESKTOP_PREVIEW_MIN_H),
+    )
+
+    padding = args.window_padding
+    if padding is None and os.environ.get("JARVIS_WINDOW_PADDING"):
+        try:
+            padding = int(os.environ["JARVIS_WINDOW_PADDING"])
+        except ValueError:
+            print("  [config] ⚠  Invalid JARVIS_WINDOW_PADDING, expected integer")
+    if padding is not None and padding >= 0:
+        _PADDING = padding
+
+    WINDOW_POSITION = (
+        args.window_position
+        or os.environ.get("JARVIS_WINDOW_POSITION")
+        or WINDOW_POSITION
+    ).lower()
+    if WINDOW_POSITION not in {"auto", "top-left", "top-right", "center", "custom"}:
+        print(f"  [config] ⚠  Invalid window position '{WINDOW_POSITION}', using auto")
+        WINDOW_POSITION = "auto"
+
+    WINDOW_COORDS = _parse_coords(
+        args.window_coordinates or os.environ.get("JARVIS_WINDOW_COORDINATES")
+    )
+    if WINDOW_COORDS:
+        WINDOW_POSITION = "custom"
 
 # ── APP REGISTRY ──────────────────────────────────────────────────────────────
 _IS_MAC = _plat.system() == "Darwin"
@@ -275,13 +350,24 @@ def _slot_pos(slot):
     else:
         sx, sy = 0, 0
         sw, sh = get_screen_size()
+    screen_x, screen_y = sx, sy
     p   = _PADDING
+    grid_w = min(sw, URL_WIN_W * 2 + p * 3)
+    grid_h = min(sh, URL_WIN_H * 2 + p * 3)
+    if WINDOW_POSITION == "custom" and WINDOW_COORDS:
+        sx, sy = WINDOW_COORDS
+    elif WINDOW_POSITION == "top-right":
+        sx = sx + max(0, sw - grid_w)
+    elif WINDOW_POSITION == "center":
+        sx = sx + max(0, (sw - grid_w) // 2)
+        sy = sy + max(0, (sh - grid_h) // 2)
     col = slot % 2
     row = slot // 2
     x   = sx + p + col * (URL_WIN_W + p)
     y   = sy + p + row * (URL_WIN_H + p)
-    x   = min(x, sx + sw - URL_WIN_W - p)
-    y   = min(y, sy + sh - URL_WIN_H - p)
+    if WINDOW_POSITION != "custom":
+        x = min(x, screen_x + sw - URL_WIN_W - p)
+        y = min(y, screen_y + sh - URL_WIN_H - p)
     return x, y
 
 def _is_desktop_preview_tab(tab):
@@ -980,6 +1066,8 @@ def check_api_key():
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
+    apply_runtime_config(sys.argv[1:])
+
     print("""
   ╔══════════════════════════════════════════╗
   ║   W E E S T R E A M  //  J A R V I S    ║
@@ -997,6 +1085,13 @@ def main():
 
     print(f"  📄  Web HTML : {WEB_HTML}")
     print(f"  🌐  Server   : http://localhost:{HTTP_PORT}/\n")
+    print(
+        "  🪟  Windows  : "
+        f"url={URL_WIN_W}x{URL_WIN_H}, "
+        f"desktop-preview-min={DESKTOP_PREVIEW_MIN_W}x{DESKTOP_PREVIEW_MIN_H}, "
+        f"padding={_PADDING}, position={WINDOW_POSITION}"
+        f"{', coordinates=' + str(WINDOW_COORDS) if WINDOW_COORDS else ''}\n"
+    )
 
     start_http_server()
 
