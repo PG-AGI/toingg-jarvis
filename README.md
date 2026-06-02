@@ -396,6 +396,8 @@ curl -X POST http://localhost:8766/file_action \
 
 Supported actions are `open_directory`, `reveal_file`, and `open_file`. JARVIS uses File Explorer on Windows, Finder on macOS, and `xdg-open` on Linux.
 
+Run `python demo_file_actions.py` to print the exact native commands without opening any local applications.
+
 ---
 
 ## 📄 Data Requirements
