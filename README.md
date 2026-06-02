@@ -419,6 +419,24 @@ Key settings in the source files:
 | `MIN_BROWSER_ACTION_AUDIO_LEAD` | `jarvis_web.html` | `0.65` s | Minimum audio buffer lead before spawning Chrome |
 | `PLAYBACK_IDLE_GRACE_MS` | `jarvis_web.html` | `220` ms | Grace period after last audio chunk before marking idle |
 
+### Optional: Pipecat + Gemini backend
+
+In addition to the default Toingg WebSocket backend, JARVIS ships with an
+optional [Pipecat](https://github.com/pipecat-ai/pipecat) pipeline that uses
+Google's [Gemini Multimodal Live API](https://ai.google.dev) for real-time
+voice, reasoning, and tool execution. The two backends are independent — the
+Toingg flow is unchanged.
+
+```bash
+pip install "pipecat-ai[google,silero,local]"
+
+# either set GEMINI_API_KEY in config.json / env, or pass --api-key
+python pipecat_backend.py --api-key "$GEMINI_API_KEY"
+```
+
+Add `"BACKEND": "pipecat"` and `"GEMINI_API_KEY": "..."` to `config.json` to
+make the selection persistent. See `pipecat_backend.py` for options.
+
 ---
 
 ## 🗂️ Project Structure
