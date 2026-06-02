@@ -71,6 +71,7 @@
 - [📄 Data Requirements](#-data-requirements)
 - [🔧 Configuration](#-configuration)
 - [🗂️ Project Structure](#️-project-structure)
+- [📦 Packaging](#-packaging)
 - [🧠 Methodology](#-methodology)
 - [⚡ Performance](#-performance)
 - [🧪 Testing](#-testing)
@@ -431,10 +432,29 @@ toingg-jarvis/
 ├── 🎨 jarvis_visual.html      # Animated orb / visual display
 ├── 🖥️  JARVIS.bat              # Windows auto-installer & launcher
 ├── 🍎 JARVIS.command          # macOS auto-installer & launcher
+├── 📦 packaging/              # PyInstaller, .app, .deb, and Windows installer helpers
+├── ⚙️  packaging/github-actions/ # GitHub Actions release workflow template
+├── 📄 PACKAGING.md            # Maintainer release packaging guide
+├── 📄 requirements.txt        # Shared Python dependencies for install/build
 ├── 🔧 setup_mac.sh            # macOS one-time permission fixer
 ├── 📄 config.json             # API credentials (create from example, not committed)
 └── 📄 config.example.json     # Config template
 ```
+
+---
+
+## 📦 Packaging
+
+Maintainers can build release artifacts with the included packaging scaffold:
+
+- `requirements.txt` defines shared runtime/build dependencies.
+- `packaging/pyinstaller/JARVIS.spec` creates the cross-platform PyInstaller build.
+- `packaging/macos/make_app.py` wraps the launcher in a minimal `.app` bundle with microphone permission metadata.
+- `packaging/linux/make_deb.sh` turns the PyInstaller output into a Debian/Ubuntu `.deb`.
+- `packaging/windows/JARVIS.iss` provides an Inno Setup template for a Windows installer.
+- `packaging/github-actions/package.yml` is a GitHub Actions template that builds artifacts on tags matching `v*` or manual workflow dispatch.
+
+See [`PACKAGING.md`](PACKAGING.md) for the full release workflow and where to install the workflow template.
 
 ---
 

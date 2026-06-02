@@ -1,0 +1,92 @@
+name: Package JARVIS
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }} artifact
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y portaudio19-dev dpkg-dev
+
+      - name: Install macOS system dependencies
+        if: runner.os == 'macOS'
+        run: brew install portaudio
+
+      - name: Install Windows installer toolchain
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+
+      - name: Install Playwright browser
+        run: python -m playwright install chromium
+
+      - name: Build PyInstaller app
+        run: python -m PyInstaller packaging/pyinstaller/JARVIS.spec --noconfirm --clean
+
+      - name: Package Windows zip
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/JARVIS/* -DestinationPath dist/JARVIS-windows.zip -Force
+
+      - name: Package Windows installer when Inno Setup is available
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (Test-Path $iscc) {
+            & $iscc packaging/windows/JARVIS.iss
+            New-Item -ItemType Directory -Force -Path dist/packages | Out-Null
+            Copy-Item packaging/windows/Output/JARVIS-Setup.exe dist/packages/JARVIS-Setup.exe
+          } else {
+            Write-Host "Inno Setup not found; zip artifact still available."
+          }
+
+      - name: Package macOS app
+        if: runner.os == 'macOS'
+        run: |
+          python packaging/macos/make_app.py dist/JARVIS/JARVIS dist/JARVIS.app
+          ditto -c -k --sequesterRsrc --keepParent dist/JARVIS.app dist/JARVIS-macos-app.zip
+
+      - name: Package Linux deb
+        if: runner.os == 'Linux'
+        run: |
+          VERSION=${GITHUB_REF_NAME#v} bash packaging/linux/make_deb.sh dist/JARVIS dist/packages
+          tar -czf dist/JARVIS-linux.tar.gz -C dist JARVIS
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-${{ runner.os }}
+          path: |
+            dist/JARVIS-*.zip
+            dist/JARVIS-linux.tar.gz
+            dist/packages/*
+          if-no-files-found: warn

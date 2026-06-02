@@ -12,7 +12,7 @@ Requirements:
     pip install sounddevice numpy speechrecognition
 """
 
-import os, sys, time, threading, subprocess, tempfile, json, webbrowser
+import os, sys, time, threading, subprocess, tempfile, json, webbrowser, runpy
 import ctypes, ctypes.wintypes
 import platform as _plat
 
@@ -385,7 +385,11 @@ def start_browser_client():
         print("  [browser] ⚠  browserClient.py not found"); return
 
     try:
-        _browser_client_proc = subprocess.Popen([sys.executable, BROWSER_CLIENT], cwd=_DIR)
+        if getattr(sys, "frozen", False):
+            cmd = [sys.executable, "--browser-client"]
+        else:
+            cmd = [sys.executable, BROWSER_CLIENT]
+        _browser_client_proc = subprocess.Popen(cmd, cwd=_DIR)
         print("  [browser] ✅ browserClient.py started")
     except Exception as e:
         print(f"  [browser] ⚠  Failed to start browserClient.py: {e}")
@@ -1013,4 +1017,7 @@ def main():
         print("\n  Stopped.")
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1 and sys.argv[1] == "--browser-client":
+        runpy.run_path(BROWSER_CLIENT, run_name="__main__")
+    else:
+        main()
