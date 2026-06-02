@@ -419,6 +419,24 @@ Key settings in the source files:
 | `MIN_BROWSER_ACTION_AUDIO_LEAD` | `jarvis_web.html` | `0.65` s | Minimum audio buffer lead before spawning Chrome |
 | `PLAYBACK_IDLE_GRACE_MS` | `jarvis_web.html` | `220` ms | Grace period after last audio chunk before marking idle |
 
+### Local file manager API
+
+The launcher also exposes safe local file helpers on `localhost:8766` for native file manager integration:
+
+```bash
+curl -X POST http://localhost:8766/open_path \
+  -H "Content-Type: application/json" \
+  -d '{"path":"/path/to/project"}'
+
+curl -X POST http://localhost:8766/reveal_path \
+  -H "Content-Type: application/json" \
+  -d '{"path":"/path/to/project/report.pdf"}'
+```
+
+- `/open_path` opens a file with the default app or a directory in the native file manager.
+- `/reveal_path` opens the containing directory and selects the file where the OS supports it.
+- Missing or empty paths are rejected with a JSON error instead of being passed to the shell.
+
 ---
 
 ## 🗂️ Project Structure
@@ -426,6 +444,7 @@ Key settings in the source files:
 ```
 toingg-jarvis/
 ├── 🐍 jarvis_launcher.py     # Wake-word listener, app launcher, HTTP server (:8766)
+├── 🐍 native_file_manager.py # Cross-platform local file/folder opener
 ├── 🐍 browserClient.py       # Playwright browser automation client
 ├── 🌐 jarvis_web.html         # Web frontend — WebSocket audio, terminal UI
 ├── 🎨 jarvis_visual.html      # Animated orb / visual display

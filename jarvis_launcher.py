@@ -16,6 +16,8 @@ import os, sys, time, threading, subprocess, tempfile, json, webbrowser
 import ctypes, ctypes.wintypes
 import platform as _plat
 
+from native_file_manager import FileManagerError, open_in_file_manager
+
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 _DIR        = os.path.dirname(os.path.abspath(__file__))
 WEB_HTML    = os.path.join(_DIR, "jarvis_web.html")
@@ -613,6 +615,28 @@ def start_http_server():
                 self._cors()
                 self.end_headers()
                 self.wfile.write(b'{"ok":true}')
+
+            elif self.path in ("/open_path", "/reveal_path"):
+                try:
+                    payload = json.loads(body) if body else {}
+                    if not isinstance(payload, dict):
+                        raise FileManagerError("JSON object payload required")
+                    path = str(payload.get("path") or "").strip()
+                    action = "reveal" if self.path == "/reveal_path" else payload.get("action", "open")
+                    open_in_file_manager(path, action=action)
+                    print(f"  [files] ✅ {action} {path}")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(b'{"ok":true}')
+                except Exception as e:
+                    print(f"  [files] ⚠  open path error: {e}")
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": str(e)}).encode())
 
             elif self.path == "/config":
                 try:
