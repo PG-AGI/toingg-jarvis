@@ -21,6 +21,7 @@ _DIR        = os.path.dirname(os.path.abspath(__file__))
 WEB_HTML    = os.path.join(_DIR, "jarvis_web.html")
 VISUAL_HTML = os.path.join(_DIR, "jarvis_visual.html")
 BROWSER_CLIENT = os.path.join(_DIR, "browserClient.py")
+PIPECAT_GEMINI_PROXY = os.path.join(_DIR, "pipecat_gemini_proxy.py")
 WAKE_WORDS  = ["hey jarvis", "jarvis", "hey jervis", "hey davis"]
 LAUNCH_COOLDOWN = 4.0
 HTTP_PORT   = 8766
@@ -375,6 +376,32 @@ def close_all_url_windows(auto=False):
 _visual_proc = None
 _web_proc    = None
 _browser_client_proc = None
+_pipecat_gemini_proc = None
+
+
+def _load_launcher_config():
+    try:
+        with open(os.path.join(_DIR, "config.json"), "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def start_pipecat_gemini_backend():
+    """Start the optional local Pipecat + Gemini backend when configured."""
+    global _pipecat_gemini_proc
+    cfg = _load_launcher_config()
+    backend = str(cfg.get("BACKEND", "toingg")).strip().lower()
+    if backend != "pipecat_gemini":
+        return
+    if _pipecat_gemini_proc and _pipecat_gemini_proc.poll() is None:
+        print("  [pipecat] already running"); return
+    if not os.path.exists(PIPECAT_GEMINI_PROXY):
+        print("  [pipecat] ⚠  pipecat_gemini_proxy.py not found"); return
+    try:
+        _pipecat_gemini_proc = subprocess.Popen([sys.executable, PIPECAT_GEMINI_PROXY], cwd=_DIR)
+        print("  [pipecat] ✅ Gemini backend started")
+    except Exception as e:
+        print(f"  [pipecat] ⚠  Failed to start Gemini backend: {e}")
 
 def start_browser_client():
     """Start browserClient.py in the background for browser automation."""
@@ -915,7 +942,13 @@ def _open_url(url):
         webbrowser.open(url)
 
 def check_api_key():
-    """If token is missing or placeholder, run interactive setup in the terminal."""
+    """If Toingg token is missing, run setup unless Pipecat backend is selected."""
+    cfg = _load_launcher_config()
+    if str(cfg.get("BACKEND", "toingg")).strip().lower() == "pipecat_gemini":
+        api_env = str(cfg.get("PIPECAT_GEMINI_API_KEY_ENV") or "GOOGLE_API_KEY")
+        if not os.getenv(api_env):
+            print(f"  [pipecat] ⚠  {api_env} is not set; Gemini backend will wait for configuration")
+        return
     token = _load_token()
     if _is_valid_token(token):
         return  # token looks valid, continue normally
@@ -999,6 +1032,7 @@ def main():
     print(f"  🌐  Server   : http://localhost:{HTTP_PORT}/\n")
 
     start_http_server()
+    start_pipecat_gemini_backend()
 
     threads = [
         threading.Thread(target=voice_listener, daemon=True, name="voice"),

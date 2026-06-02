@@ -92,6 +92,7 @@ CAMP_ID = "your-campaign-id-here"
 ## What it does
 
 - Connects to your JARVIS AI campaign over WebSocket
+- Can optionally route audio through a local Pipecat + Gemini Live backend
 - Opens a live terminal UI with spectrum visualizer
 - Press **Enter** to speak — JARVIS listens and responds via audio
 - When JARVIS fetches news/weather/war updates, browser tabs open automatically in a 2×2 grid
@@ -118,3 +119,15 @@ pip install pyaudio
 
 **Audio distortion / no sound:**
 - Check your default output device is set correctly in system sound settings
+
+
+## Optional Pipecat + Gemini backend
+
+Install optional dependencies with:
+
+```bash
+python3 -m pip install -r requirements-pipecat-gemini.txt
+export GOOGLE_API_KEY=your_google_ai_studio_key
+```
+
+Set `BACKEND` to `pipecat_gemini` in `config.json`. The launcher starts `pipecat_gemini_proxy.py` locally and the browser connects to `ws://localhost:8767/ws`. Leave `BACKEND` as `toingg` to keep the original Toingg pipeline.

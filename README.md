@@ -118,6 +118,7 @@ All three layers run simultaneously and communicate over `localhost:8766`.
 **🎙️ Voice Interaction**
 - Wake-word activation — just say **"Hey Jarvis"**
 - Real-time WebSocket streaming to Toingg AI
+- Optional Pipecat + Gemini Live backend for local experimentation
 - Barge-in support while AI is speaking
 - SpeechRecognition + Web Speech API
 
@@ -400,6 +401,17 @@ cp config.example.json config.json
 
 > 🆓 The default campaign ID `69d79c72b7ab98a9ef49bcad` is the **free JARVIS demo** shown in the preview video — no setup required beyond your API token.
 
+### Optional Pipecat + Gemini backend
+
+To try Gemini Live through Pipecat without exposing a Google API key in the browser:
+
+```bash
+python3 -m pip install -r requirements-pipecat-gemini.txt
+export GOOGLE_API_KEY=your_google_ai_studio_key
+```
+
+Then set `BACKEND` to `pipecat_gemini` in `config.json` and run `python3 jarvis_launcher.py`. The launcher starts `pipecat_gemini_proxy.py` on `ws://localhost:8767/ws`, while the web UI keeps using the existing Float32 audio protocol. If `BACKEND` remains `toingg`, nothing changes.
+
 > 🔒 `config.json` is listed in `.gitignore` and will never be committed to version control.
 
 ---
@@ -413,6 +425,8 @@ Key settings in the source files:
 | `WAKE_WORDS` | `jarvis_launcher.py` | `["hey jarvis", "jarvis", ...]` | Phrases that trigger full launch |
 | `LAUNCH_COOLDOWN` | `jarvis_launcher.py` | `4.0` s | Minimum seconds between consecutive launches |
 | `HTTP_PORT` | `jarvis_launcher.py` | `8766` | Local server port |
+| `BACKEND` | `config.json` | `toingg` | Use `toingg` or optional `pipecat_gemini` backend |
+| `PIPECAT_WS_URL` | `config.json` | `ws://localhost:8767/ws` | Local Pipecat/Gemini WebSocket endpoint |
 | `energy_threshold` | `jarvis_launcher.py` | `400` | Mic sensitivity (lower = more sensitive) |
 | `pause_threshold` | `jarvis_launcher.py` | `1.2` s | Silence duration before phrase ends |
 | `BROWSER_ACTION_DELAY_MS` | `jarvis_web.html` | `900` ms | Delay before first browser tab opens after audio starts |

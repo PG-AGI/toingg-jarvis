@@ -1,5 +1,14 @@
 {
+  "BACKEND": "toingg",
   "WS_URL": "wss://prepodapi.toingg.com/api/v3/media/streaming",
-  "TOKEN":  "your-token-here",
-  "CAMP_ID": "your-campaign-id-here"
+  "TOKEN": "your-token-here",
+  "CAMP_ID": "your-campaign-id-here",
+
+  "PIPECAT_WS_URL": "ws://localhost:8767/ws",
+  "PIPECAT_HOST": "localhost",
+  "PIPECAT_PORT": 8767,
+  "PIPECAT_WS_PATH": "/ws",
+  "PIPECAT_GEMINI_API_KEY_ENV": "GOOGLE_API_KEY",
+  "PIPECAT_GEMINI_MODEL": "models/gemini-2.5-flash-native-audio-preview-12-2025",
+  "PIPECAT_GEMINI_VOICE": "Puck"
 }
