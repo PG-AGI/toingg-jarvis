@@ -7,6 +7,7 @@ HTTP server on :8766:
   GET  /          → serves jarvis_web.html
   POST /open_tabs → opens URLs in 2×2 Chrome slot grid
   POST /close_tabs→ terminates all slot windows
+  POST /file_action → opens folders, reveals files, or opens files natively
 
 Requirements:
     pip install sounddevice numpy speechrecognition
@@ -87,6 +88,18 @@ PROCESS_NAMES = {
     "code":               "Code.exe",
     "visual studio code": "Code.exe",
     "spotify":            "Spotify.exe",
+}
+
+COMMON_DIRECTORIES = {
+    "home": "~",
+    "desktop": "~/Desktop",
+    "documents": "~/Documents",
+    "downloads": "~/Downloads",
+    "pictures": "~/Pictures",
+    "music": "~/Music",
+    "videos": "~/Videos",
+    "project": _DIR,
+    "jarvis": _DIR,
 }
 
 # ── CHROME FINDER (cross-platform) ───────────────────────────────────────────
@@ -371,6 +384,82 @@ def close_all_url_windows(auto=False):
         _url_slot_wins.pop(slot, None)
         _url_slot_modes.pop(slot, None)
 
+# ── NATIVE FILE MANAGER ACTIONS ──────────────────────────────────────────────
+def _normalize_local_path(path):
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("path is required")
+    return os.path.abspath(os.path.expandvars(os.path.expanduser(path.strip())))
+
+def open_directory(path):
+    target = _normalize_local_path(path)
+    if not os.path.isdir(target):
+        raise FileNotFoundError(f"directory not found: {target}")
+
+    plat = _plat.system()
+    if plat == "Windows":
+        subprocess.Popen(["explorer", target])
+    elif plat == "Darwin":
+        subprocess.Popen(["open", target])
+    else:
+        subprocess.Popen(["xdg-open", target])
+    print(f"  [file] ✅ Opened directory: {target}")
+    return target
+
+def reveal_file(path):
+    target = _normalize_local_path(path)
+    if not os.path.exists(target):
+        raise FileNotFoundError(f"path not found: {target}")
+
+    plat = _plat.system()
+    if plat == "Windows":
+        subprocess.Popen(["explorer", "/select,", target])
+    elif plat == "Darwin":
+        subprocess.Popen(["open", "-R", target])
+    else:
+        directory = target if os.path.isdir(target) else os.path.dirname(target)
+        subprocess.Popen(["xdg-open", directory])
+    print(f"  [file] ✅ Revealed path: {target}")
+    return target
+
+def open_file(path):
+    target = _normalize_local_path(path)
+    if not os.path.isfile(target):
+        raise FileNotFoundError(f"file not found: {target}")
+
+    plat = _plat.system()
+    if plat == "Windows":
+        os.startfile(target)  # type: ignore[attr-defined]
+    elif plat == "Darwin":
+        subprocess.Popen(["open", target])
+    else:
+        subprocess.Popen(["xdg-open", target])
+    print(f"  [file] ✅ Opened file: {target}")
+    return target
+
+def run_file_action(action, path):
+    action = str(action or "").strip().lower()
+    if action == "open_directory":
+        return open_directory(path)
+    if action == "reveal_file":
+        return reveal_file(path)
+    if action == "open_file":
+        return open_file(path)
+    raise ValueError("action must be open_directory, reveal_file, or open_file")
+
+def open_common_directory_from_command(text):
+    normalized = text.lower()
+    if not any(phrase in normalized for phrase in ["open folder", "open directory", "open finder", "open explorer"]):
+        return False
+
+    for name, path in COMMON_DIRECTORIES.items():
+        if name in normalized:
+            threading.Thread(target=open_directory, args=(path,), daemon=True).start()
+            print(f"  [cmd] ✅ open {name} folder")
+            return True
+
+    print(f"  [cmd] ⚠  Unknown folder command: \"{text}\"")
+    return True
+
 # ── JARVIS WINDOWS ────────────────────────────────────────────────────────────
 _visual_proc = None
 _web_proc    = None
@@ -614,6 +703,27 @@ def start_http_server():
                 self.end_headers()
                 self.wfile.write(b'{"ok":true}')
 
+            elif self.path == "/file_action":
+                try:
+                    payload = json.loads(body) if body else {}
+                    if not isinstance(payload, dict):
+                        raise ValueError("payload must be a JSON object")
+                    action = payload.get("action")
+                    path = payload.get("path")
+                    resolved_path = run_file_action(action, path)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": True, "path": resolved_path}).encode())
+                except Exception as e:
+                    print(f"  [file] ⚠  file_action error: {e}")
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+
             elif self.path == "/config":
                 try:
                     payload = json.loads(body) if body else {}
@@ -818,6 +928,8 @@ def handle_command(text):
         full_launch("wake word")
         return
     if "open" in text:
+        if open_common_directory_from_command(text):
+            return
         for app_name in APPS:
             if app_name in text:
                 print(f"  [cmd] ✅ open {app_name}")

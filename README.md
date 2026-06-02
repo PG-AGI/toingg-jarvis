@@ -146,6 +146,7 @@ All three layers run simultaneously and communicate over `localhost:8766`.
 
 **🚀 App Launcher**
 - Launch Spotify, VS Code, Chrome & more by voice
+- Open folders, reveal files, and launch local files with native OS tools
 - Smart window focus if app is already running
 - Custom window size + positioning per app
 - Platform-aware paths (Windows / macOS / Linux)
@@ -370,9 +371,30 @@ python3 jarvis_launcher.py
 | Say **"open Spotify"** | Launches Spotify |
 | Say **"open Chrome"** | Launches Chrome |
 | Say **"open VS Code"** | Launches Visual Studio Code |
+| Say **"open downloads folder"** | Opens Downloads in Finder / File Explorer / file manager |
 | **Ctrl+C** in terminal | Exit JARVIS |
 
 When JARVIS fetches news, weather, or web results — Chrome windows open automatically in a **2×2 grid** and close after the response finishes.
+
+### Native file actions
+
+The local HTTP server also exposes cross-platform file manager actions:
+
+```bash
+curl -X POST http://localhost:8766/file_action \
+  -H "Content-Type: application/json" \
+  -d '{"action":"open_directory","path":"~/Downloads"}'
+
+curl -X POST http://localhost:8766/file_action \
+  -H "Content-Type: application/json" \
+  -d '{"action":"reveal_file","path":"~/Downloads/report.pdf"}'
+
+curl -X POST http://localhost:8766/file_action \
+  -H "Content-Type: application/json" \
+  -d '{"action":"open_file","path":"~/Documents/notes.txt"}'
+```
+
+Supported actions are `open_directory`, `reveal_file`, and `open_file`. JARVIS uses File Explorer on Windows, Finder on macOS, and `xdg-open` on Linux.
 
 ---
 
