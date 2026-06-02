@@ -614,6 +614,30 @@ def start_http_server():
                 self.end_headers()
                 self.wfile.write(b'{"ok":true}')
 
+            elif self.path in ("/open_directory", "/reveal_file", "/open_file"):
+                try:
+                    payload = json.loads(body) if body else {}
+                    path = (payload.get("path") or "").strip() if isinstance(payload, dict) else ""
+                    if not path:
+                        raise ValueError("path is empty")
+                    action = self.path.lstrip("/")
+                    fn = {"open_directory": open_directory,
+                          "reveal_file":    reveal_file,
+                          "open_file":      open_file}[action]
+                    ok = bool(fn(path))
+                    self.send_response(200 if ok else 400)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": ok, "path": _expand_path(path)}).encode())
+                except Exception as e:
+                    print(f"  [fs] ⚠  {self.path} error: {e}")
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": str(e)}).encode())
+
             elif self.path == "/config":
                 try:
                     payload = json.loads(body) if body else {}
@@ -783,6 +807,86 @@ def open_app(name):
             print(f"  [app] ⚠  Failed: {e}")
     print(f"  [app] ✗ Could not open: {name}")
     return False
+
+# ── NATIVE FILE MANAGER (cross-platform) ─────────────────────────────────────
+def _expand_path(path):
+    return os.path.abspath(os.path.expanduser(os.path.expandvars(str(path))))
+
+def _linux_file_manager_open(path):
+    for cmd in ["xdg-open", "nautilus", "dolphin", "thunar", "pcmanfm", "nemo"]:
+        try:
+            subprocess.Popen([cmd, path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        except FileNotFoundError:
+            continue
+        except Exception:
+            continue
+    return False
+
+def open_directory(path):
+    """Open the native file manager at the given directory."""
+    p = _expand_path(path)
+    if not os.path.isdir(p):
+        print(f"  [fs] ⚠  Not a directory: {p}")
+        return False
+    try:
+        plat = _plat.system()
+        if plat == "Darwin":
+            subprocess.Popen(["open", p])
+        elif plat == "Windows":
+            os.startfile(p)  # type: ignore[attr-defined]
+        else:
+            if not _linux_file_manager_open(p):
+                print(f"  [fs] ⚠  No file manager found"); return False
+        print(f"  [fs] ✅ Opened directory {p}")
+        return True
+    except Exception as e:
+        print(f"  [fs] ⚠  open_directory failed: {e}")
+        return False
+
+def reveal_file(path):
+    """Open the file manager with the given file selected/highlighted."""
+    p = _expand_path(path)
+    if not os.path.exists(p):
+        print(f"  [fs] ⚠  Path not found: {p}")
+        return False
+    try:
+        plat = _plat.system()
+        if plat == "Darwin":
+            subprocess.Popen(["open", "-R", p])
+        elif plat == "Windows":
+            subprocess.Popen(["explorer", f"/select,{p}"])
+        else:
+            # Most Linux file managers don't reliably support "select"; fall back to opening parent.
+            parent = p if os.path.isdir(p) else os.path.dirname(p) or "/"
+            if not _linux_file_manager_open(parent):
+                print(f"  [fs] ⚠  No file manager found"); return False
+        print(f"  [fs] ✅ Revealed {p}")
+        return True
+    except Exception as e:
+        print(f"  [fs] ⚠  reveal_file failed: {e}")
+        return False
+
+def open_file(path):
+    """Open a local file with its default application."""
+    p = _expand_path(path)
+    if not os.path.exists(p):
+        print(f"  [fs] ⚠  File not found: {p}")
+        return False
+    try:
+        plat = _plat.system()
+        if plat == "Darwin":
+            subprocess.Popen(["open", p])
+        elif plat == "Windows":
+            os.startfile(p)  # type: ignore[attr-defined]
+        else:
+            if not _linux_file_manager_open(p):
+                print(f"  [fs] ⚠  No opener found"); return False
+        print(f"  [fs] ✅ Opened file {p}")
+        return True
+    except Exception as e:
+        print(f"  [fs] ⚠  open_file failed: {e}")
+        return False
 
 # ── STATE ─────────────────────────────────────────────────────────────────────
 last_launch  = 0.0
