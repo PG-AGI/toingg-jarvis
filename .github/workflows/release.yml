@@ -1,0 +1,129 @@
+name: Build native installers
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to embed in installer filenames (e.g. 1.0.0)'
+        required: false
+        default: '0.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  resolve-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${{ github.event.inputs.version || '0.0.0' }}" >> "$GITHUB_OUTPUT"
+          fi
+
+  windows:
+    needs: resolve-version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -r packaging/requirements.txt
+      - name: Build with PyInstaller
+        run: pyinstaller --noconfirm packaging/jarvis.spec
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
+            "/DAppVersion=${{ needs.resolve-version.outputs.version }}" `
+            packaging\windows\installer.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-windows-installer
+          path: dist/installer/*.exe
+
+  linux:
+    needs: resolve-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y portaudio19-dev libasound2-dev dpkg-dev
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -r packaging/requirements.txt
+      - name: Build with PyInstaller
+        run: pyinstaller --noconfirm packaging/jarvis.spec
+      - name: Build .deb
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: bash packaging/linux/build_deb.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-linux-deb
+          path: dist/deb/*.deb
+
+  macos:
+    needs: resolve-version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install system deps
+        run: brew install portaudio
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -r packaging/requirements.txt
+      - name: Build with PyInstaller
+        run: pyinstaller --noconfirm packaging/jarvis.spec
+      - name: Build .dmg
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: bash packaging/macos/build_dmg.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-macos-dmg
+          path: dist/*.dmg
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/jarvis-windows-installer/*.exe
+            artifacts/jarvis-linux-deb/*.deb
+            artifacts/jarvis-macos-dmg/*.dmg
