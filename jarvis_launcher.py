@@ -13,8 +13,11 @@ Requirements:
 """
 
 import os, sys, time, threading, subprocess, tempfile, json, webbrowser
+import io, mimetypes, uuid
 import ctypes, ctypes.wintypes
 import platform as _plat
+from email.parser import BytesParser
+from email.policy import default as email_policy
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 _DIR        = os.path.dirname(os.path.abspath(__file__))
@@ -24,6 +27,9 @@ BROWSER_CLIENT = os.path.join(_DIR, "browserClient.py")
 WAKE_WORDS  = ["hey jarvis", "jarvis", "hey jervis", "hey davis"]
 LAUNCH_COOLDOWN = 4.0
 HTTP_PORT   = 8766
+UPLOAD_DIR  = os.path.join(_DIR, ".cache", "uploads")
+UPLOAD_TTL_SECONDS = 30 * 60
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
 # ── shared state (jarvis_web.html POSTs here; jarvis_visual.html polls here) ─
 _http_state      = {"state": "initializing", "text": "", "status": "INITIALIZING..."}
@@ -39,6 +45,62 @@ _url_slot      = 0
 _url_slot_wins = {}
 _url_slot_modes = {}
 _slot_profiles = {}
+
+def _ensure_upload_dir():
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+def _cleanup_expired_uploads():
+    _ensure_upload_dir()
+    now = time.time()
+    for name in os.listdir(UPLOAD_DIR):
+        path = os.path.join(UPLOAD_DIR, name)
+        try:
+            if os.path.isfile(path) and now - os.path.getmtime(path) > UPLOAD_TTL_SECONDS:
+                os.remove(path)
+        except OSError:
+            pass
+
+def _safe_upload_extension(filename, content_type=""):
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext and ext.replace(".", "").isalnum() and len(ext) <= 12:
+        return ext
+    guessed = mimetypes.guess_extension(content_type or "")
+    return guessed if guessed and len(guessed) <= 12 else ".bin"
+
+def _store_upload(filename, content_type, source):
+    _cleanup_expired_uploads()
+    token = f"{uuid.uuid4().hex}{_safe_upload_extension(filename, content_type)}"
+    path = os.path.join(UPLOAD_DIR, token)
+    written = 0
+    with open(path, "wb") as out:
+        while True:
+            chunk = source.read(1024 * 1024)
+            if not chunk:
+                break
+            written += len(chunk)
+            if written > MAX_UPLOAD_BYTES:
+                out.close()
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+                raise ValueError(f"upload exceeds {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit")
+            out.write(chunk)
+    if written == 0:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        raise ValueError("uploaded file is empty")
+    return {
+        "token": token,
+        "path": path,
+        "url": f"http://localhost:{HTTP_PORT}/api/uploads/{token}",
+        "filename": os.path.basename(filename or token),
+        "content_type": content_type or "application/octet-stream",
+        "size": written,
+        "expires_in_seconds": UPLOAD_TTL_SECONDS,
+    }
 
 # ── APP REGISTRY ──────────────────────────────────────────────────────────────
 _IS_MAC = _plat.system() == "Darwin"
@@ -500,6 +562,39 @@ def start_http_server():
             self.send_header("Access-Control-Allow-Headers", "Content-Type")
             self.send_header("Cache-Control", "no-store")
 
+        def _send_json(self, status, payload):
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self._cors()
+            self.end_headers()
+            self.wfile.write(json.dumps(payload).encode())
+
+        def _handle_upload(self, body):
+            content_type = self.headers.get("Content-Type", "")
+            if not content_type.lower().startswith("multipart/form-data"):
+                raise ValueError("expected multipart/form-data")
+
+            raw = f"Content-Type: {content_type}\n\n".encode() + body
+            form = BytesParser(policy=email_policy).parsebytes(raw)
+            uploads = []
+            for field in form.iter_parts():
+                filename = field.get_filename()
+                if not filename:
+                    continue
+                payload = field.get_payload(decode=True)
+                if payload is None:
+                    payload = b""
+                uploads.append(
+                    _store_upload(
+                        filename,
+                        field.get_content_type(),
+                        io.BytesIO(payload),
+                    )
+                )
+            if not uploads:
+                raise ValueError("no file fields found in upload")
+            return uploads
+
         def do_OPTIONS(self):
             self.send_response(200)
             self._cors()
@@ -524,6 +619,15 @@ def start_http_server():
                 self._serve_file(VISUAL_HTML)
             elif self.path == "/config.json":
                 self._serve_file(os.path.join(_DIR, "config.json"), "application/json")
+            elif self.path.startswith("/api/uploads/"):
+                _cleanup_expired_uploads()
+                token = os.path.basename(self.path.split("?", 1)[0])
+                path = os.path.join(UPLOAD_DIR, token)
+                if not token or not os.path.isfile(path):
+                    self._send_json(404, {"error": "upload not found"})
+                    return
+                ctype = mimetypes.guess_type(path)[0] or "application/octet-stream"
+                self._serve_file(path, ctype)
             elif self.path == "/state":
                 with _http_state_lock:
                     data = json.dumps(_http_state).encode()
@@ -537,10 +641,20 @@ def start_http_server():
 
         def do_POST(self):
             global _url_slot
+            path = self.path.split("?", 1)[0]
             length = int(self.headers.get("Content-Length", 0))
-            body   = self.rfile.read(length) if length else b""
+            body = self.rfile.read(length) if length else b""
 
-            if self.path == "/state":
+            if path == "/api/uploads":
+                try:
+                    uploads = self._handle_upload(body)
+                    self._send_json(201, {"ok": True, "uploads": uploads})
+                    print(f"  [upload] ✅ Stored {len(uploads)} file(s)")
+                except Exception as e:
+                    print(f"  [upload] ⚠  upload error: {e}")
+                    self._send_json(400, {"ok": False, "error": str(e)})
+
+            elif path == "/state":
                 try:
                     payload = json.loads(body) if body else {}
                     with _http_state_lock:
@@ -553,7 +667,7 @@ def start_http_server():
                 self.end_headers()
                 self.wfile.write(b'{"ok":true}')
 
-            elif self.path == "/open_tabs":
+            elif path == "/open_tabs":
                 try:
                     tabs = json.loads(body) if body else []
                     tabs = tabs[:4]
@@ -576,7 +690,7 @@ def start_http_server():
                 self.end_headers()
                 self.wfile.write(b'{"ok":true}')
 
-            elif self.path == "/open_window":
+            elif path == "/open_window":
                 try:
                     tab = json.loads(body) if body else {}
                     url = tab.get("url", tab) if isinstance(tab, dict) else str(tab)
@@ -597,7 +711,7 @@ def start_http_server():
                 self.end_headers()
                 self.wfile.write(b'{"ok":true}')
 
-            elif self.path == "/close_tabs":
+            elif path == "/close_tabs":
                 try:
                     payload = json.loads(body) if body else {}
                 except Exception:
@@ -614,7 +728,7 @@ def start_http_server():
                 self.end_headers()
                 self.wfile.write(b'{"ok":true}')
 
-            elif self.path == "/config":
+            elif path == "/config":
                 try:
                     payload = json.loads(body) if body else {}
                     token = payload.get("token", "").strip()

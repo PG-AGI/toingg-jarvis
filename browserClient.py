@@ -45,6 +45,8 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [BROWSER] %(message)s")
 log = logging.getLogger(__name__)
 
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache", "uploads")
+
 # ---------------------------------------------------------------------------
 # Stealth init script — patches common fingerprint leaks that trigger Google
 # ---------------------------------------------------------------------------
@@ -188,6 +190,77 @@ class BrowserClient:
         if len(normalized) <= limit:
             return normalized
         return normalized[: limit - 3] + "..."
+
+    @staticmethod
+    def _resolve_file_reference(value: str) -> str:
+        """Resolve an upload token or local path into a file path for Playwright."""
+        if not value:
+            raise ValueError("file reference is empty")
+
+        raw = str(value)
+        if raw.startswith("upload:"):
+            raw = raw.split(":", 1)[1]
+
+        local_path = os.path.abspath(os.path.expanduser(raw))
+        if os.path.isfile(local_path):
+            return local_path
+
+        token = os.path.basename(raw)
+        if not token or token in {".", ".."} or token != raw:
+            raise ValueError(f"invalid upload token or file path: {value}")
+
+        upload_path = os.path.abspath(os.path.join(UPLOAD_DIR, token))
+        upload_root = os.path.abspath(UPLOAD_DIR)
+        if os.path.commonpath([upload_root, upload_path]) != upload_root:
+            raise ValueError(f"invalid upload token: {value}")
+        if not os.path.isfile(upload_path):
+            raise FileNotFoundError(f"upload token not found: {value}")
+        return upload_path
+
+    @staticmethod
+    def _is_managed_upload(path: str) -> bool:
+        upload_root = os.path.abspath(UPLOAD_DIR)
+        candidate = os.path.abspath(path)
+        return os.path.commonpath([upload_root, candidate]) == upload_root
+
+    def _input_files(self, selector: str, params: dict) -> str:
+        references = (
+            params.get("paths")
+            or params.get("files")
+            or params.get("upload_tokens")
+            or params.get("tokens")
+        )
+        if references is None:
+            single = (
+                params.get("path")
+                or params.get("file")
+                or params.get("upload_token")
+                or params.get("token")
+            )
+            references = [single]
+        elif isinstance(references, str):
+            references = [references]
+
+        resolved = [self._resolve_file_reference(item) for item in references if item]
+        if not resolved:
+            raise ValueError("input_file requires at least one path or upload token")
+
+        page = self.page
+        if page is None:
+            raise RuntimeError("Browser page not initialised")
+
+        page.set_input_files(selector, resolved, timeout=params.get("timeout", 10000))
+
+        if params.get("cleanup", True):
+            for path in resolved:
+                if self._is_managed_upload(path):
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+
+        noun = "file" if len(resolved) == 1 else "files"
+        return f"Attached {len(resolved)} {noun} to '{selector}'"
 
     def _click_element(self, selector: str, timeout: int, force: bool = False) -> str:
         page = self.page
@@ -1044,6 +1117,12 @@ class BrowserClient:
                 self._human_delay()
                 page.select_option(selector, value)
                 return {"success": True, "result": f"Selected '{value}' in '{selector}'"}
+
+            elif action == "input_file":
+                selector = params["selector"]
+                self._human_delay(80, 250)
+                result = self._input_files(selector, params)
+                return {"success": True, "result": result}
 
             elif action == "scroll":
                 x = params.get("x", 0)

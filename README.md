@@ -374,6 +374,46 @@ python3 jarvis_launcher.py
 
 When JARVIS fetches news, weather, or web results — Chrome windows open automatically in a **2×2 grid** and close after the response finishes.
 
+### Uploading files for browser automation
+
+The local HTTP server accepts standard multipart uploads and returns upload tokens
+that can be passed to Playwright `input_file` actions:
+
+```bash
+curl -F "file=@screenshot.png" http://localhost:8766/api/uploads
+```
+
+Example response:
+
+```json
+{
+  "ok": true,
+  "uploads": [
+    {
+      "token": "4f2a...c9.png",
+      "path": "/path/to/toingg-jarvis/.cache/uploads/4f2a...c9.png",
+      "url": "http://localhost:8766/api/uploads/4f2a...c9.png"
+    }
+  ]
+}
+```
+
+Send the token or returned path in an `input_file` browser action:
+
+```json
+{
+  "action": "input_file",
+  "params": {
+    "selector": "input[type=file]",
+    "upload_token": "4f2a...c9.png"
+  }
+}
+```
+
+Uploaded files are stored under `.cache/uploads`, expire after 30 minutes, and
+are removed automatically after `input_file` uses them unless `cleanup` is set
+to `false`.
+
 ---
 
 ## 📄 Data Requirements
