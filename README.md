@@ -152,6 +152,26 @@ All three layers run simultaneously and communicate over `localhost:8766`.
 
 </td>
 </tr>
+<tr>
+<td width="50%">
+
+**🗂️ Native File Manager**
+- Open folders in Finder / Explorer / Linux file manager
+- Reveal a specific file in its containing folder
+- Open local files with the platform default app
+- Safe JSON endpoint with path validation and clear errors
+
+</td>
+<td width="50%">
+
+**🔌 Local Tool Bridge**
+- `POST /file_action` accepts `open_file`, `open_directory`, or `reveal_file`
+- WebSocket events such as `open_file` and `show_in_folder` trigger the bridge
+- No shell-string execution; commands are launched as argument lists
+- Falls back to clickable browser links for URL actions
+
+</td>
+</tr>
 </table>
 
 ---
@@ -370,9 +390,31 @@ python3 jarvis_launcher.py
 | Say **"open Spotify"** | Launches Spotify |
 | Say **"open Chrome"** | Launches Chrome |
 | Say **"open VS Code"** | Launches Visual Studio Code |
+| Assistant sends `open_directory` / `open_file` / `reveal_file` | Opens Finder, Explorer, or the Linux file manager |
 | **Ctrl+C** in terminal | Exit JARVIS |
 
 When JARVIS fetches news, weather, or web results — Chrome windows open automatically in a **2×2 grid** and close after the response finishes.
+
+### Native file-manager actions
+
+The local launcher exposes a small file bridge for assistant commands:
+
+```http
+POST http://localhost:8766/file_action
+Content-Type: application/json
+
+{ "action": "open_directory", "path": "~/Downloads" }
+```
+
+Supported actions:
+
+| Action | Behavior |
+|--------|----------|
+| `open_directory` | Opens the folder in Finder / Explorer / Linux file manager. Empty path defaults to the user's home folder. |
+| `open_file` | Opens an existing file with the operating system's default application. |
+| `reveal_file` / `show_in_folder` | Reveals a file in its containing folder (`open -R` on macOS, `explorer /select` on Windows, parent folder on Linux). |
+
+The web UI also handles matching WebSocket events, so a backend message such as `{"event":"reveal_file","path":"/path/to/file.txt"}` will call the local bridge.
 
 ---
 

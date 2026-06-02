@@ -12,7 +12,7 @@ Requirements:
     pip install sounddevice numpy speechrecognition
 """
 
-import os, sys, time, threading, subprocess, tempfile, json, webbrowser
+import os, sys, time, threading, subprocess, tempfile, json, webbrowser, shutil
 import ctypes, ctypes.wintypes
 import platform as _plat
 
@@ -24,6 +24,21 @@ BROWSER_CLIENT = os.path.join(_DIR, "browserClient.py")
 WAKE_WORDS  = ["hey jarvis", "jarvis", "hey jervis", "hey davis"]
 LAUNCH_COOLDOWN = 4.0
 HTTP_PORT   = 8766
+
+FILE_ACTION_ALIASES = {
+    "open": "open_file",
+    "open_file": "open_file",
+    "file": "open_file",
+    "open_directory": "open_directory",
+    "open_dir": "open_directory",
+    "open_folder": "open_directory",
+    "folder": "open_directory",
+    "directory": "open_directory",
+    "reveal": "reveal_file",
+    "reveal_file": "reveal_file",
+    "show_in_folder": "reveal_file",
+    "show_in_finder": "reveal_file",
+}
 
 # ── shared state (jarvis_web.html POSTs here; jarvis_visual.html polls here) ─
 _http_state      = {"state": "initializing", "text": "", "status": "INITIALIZING..."}
@@ -228,6 +243,86 @@ def get_active_screen_bounds():
             pass
 
     return None
+
+def normalize_file_action(action):
+    """Return the canonical native file-manager action name."""
+    action = str(action or "open_directory").strip().lower().replace("-", "_")
+    if action not in FILE_ACTION_ALIASES:
+        allowed = ", ".join(sorted(set(FILE_ACTION_ALIASES.values())))
+        raise ValueError(f"unsupported file action '{action}'. Allowed: {allowed}")
+    return FILE_ACTION_ALIASES[action]
+
+def resolve_local_file_path(path, action="open_directory"):
+    """Expand and validate a user-supplied local path for native file actions."""
+    action = normalize_file_action(action)
+    if not path:
+        if action == "open_directory":
+            path = "~"
+        else:
+            raise ValueError("path is required for this file action")
+    if not isinstance(path, str):
+        raise ValueError("path must be a string")
+
+    resolved = os.path.abspath(os.path.expandvars(os.path.expanduser(path.strip())))
+    if not os.path.exists(resolved):
+        raise FileNotFoundError(f"path does not exist: {resolved}")
+    return resolved
+
+def _linux_open_command(path):
+    for candidate in ("xdg-open", "gio", "gnome-open", "kde-open"):
+        found = shutil.which(candidate)
+        if found:
+            return [found, "open", path] if candidate == "gio" else [found, path]
+    raise RuntimeError("no Linux file opener found (install xdg-utils or gio)")
+
+def build_native_file_command(action, path, system=None):
+    """Build the platform-native command used to open/reveal a local path."""
+    action = normalize_file_action(action)
+    system = system or _plat.system()
+    is_dir = os.path.isdir(path)
+
+    if action == "open_directory" and not is_dir:
+        path = os.path.dirname(path)
+        is_dir = True
+
+    if system == "Darwin":
+        if action == "reveal_file":
+            return ["open", "-R", path]
+        return ["open", path]
+
+    if system == "Windows":
+        if action == "open_file" and not is_dir:
+            return ["startfile", path]
+        if action == "reveal_file" and not is_dir:
+            return ["explorer", f"/select,{path}"]
+        return ["explorer", path]
+
+    if action == "reveal_file" and not is_dir:
+        path = os.path.dirname(path)
+    return _linux_open_command(path)
+
+def run_file_action(payload):
+    """Open a file, open a directory, or reveal a file in the OS file manager."""
+    if not isinstance(payload, dict):
+        raise ValueError("payload must be a JSON object")
+
+    action = normalize_file_action(payload.get("action") or payload.get("type"))
+    path = payload.get("path") or payload.get("file") or payload.get("directory")
+    path = resolve_local_file_path(path, action)
+    command = build_native_file_command(action, path)
+
+    if command[0] == "startfile":
+        os.startfile(command[1])  # type: ignore[attr-defined]
+    else:
+        subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    return {
+        "ok": True,
+        "action": action,
+        "path": path,
+        "platform": _plat.system(),
+        "command": command[0],
+    }
 
 def top_center_near_active_window(win_w):
     """Place a window at the top of the same display area as the active app."""
@@ -613,6 +708,24 @@ def start_http_server():
                 self._cors()
                 self.end_headers()
                 self.wfile.write(b'{"ok":true}')
+
+            elif self.path == "/file_action":
+                try:
+                    payload = json.loads(body) if body else {}
+                    result = run_file_action(payload)
+                    print(f"  [files] ✅ {result['action']} → {result['path']}")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps(result).encode())
+                except Exception as e:
+                    print(f"  [files] ⚠  file_action error: {e}")
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
 
             elif self.path == "/config":
                 try:

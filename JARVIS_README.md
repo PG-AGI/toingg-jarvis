@@ -96,7 +96,21 @@ CAMP_ID = "your-campaign-id-here"
 - Press **Enter** to speak — JARVIS listens and responds via audio
 - When JARVIS fetches news/weather/war updates, browser tabs open automatically in a 2×2 grid
 - JARVIS can open specific URLs, scrape article details, and close tabs on command
+- JARVIS can open folders, reveal local files, and open files through the native file manager (`/file_action`)
 - Press **Ctrl+C** to stop
+
+### Native file manager commands
+
+When the launcher is running, the web UI can call the local bridge:
+
+```http
+POST http://localhost:8766/file_action
+Content-Type: application/json
+
+{ "action": "reveal_file", "path": "/path/to/file.txt" }
+```
+
+Supported actions are `open_directory`, `open_file`, and `reveal_file` / `show_in_folder`. The bridge validates that the target exists, then uses Finder on macOS, Explorer on Windows, or the available Linux opener (`xdg-open` / `gio`).
 
 ---
 

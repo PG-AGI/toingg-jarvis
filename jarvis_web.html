@@ -925,6 +925,37 @@ const SERVER = "http://localhost:8766";
 const urlBarEl    = document.getElementById("url-bar");
 const urlLinksEl  = document.getElementById("url-links");
 
+function normalizeFileActionMessage(msg = {}) {
+  const ev = String(msg.event || msg.type || "").trim().toLowerCase();
+  const action = String(msg.action || ev || "open_directory")
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, "_");
+  return {
+    action,
+    path: msg.path || msg.file || msg.directory || "",
+    label: msg.label || msg.title || msg.path || msg.file || msg.directory || action,
+  };
+}
+
+async function runNativeFileAction(msg = {}) {
+  const payload = normalizeFileActionMessage(msg);
+  try {
+    const res = await fetch(`${SERVER}/file_action`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) throw new Error(data.error || `HTTP ${res.status}`);
+    logChat("sys", `◈ FILE ACTION: ${payload.action} — ${payload.label}`);
+    return true;
+  } catch (err) {
+    logChat("sys", `◈ FILE ACTION FAILED: ${payload.action} — ${err.message || err}`);
+    return false;
+  }
+}
+
 function isCampaignDashboardLabel(label) {
   return String(label || "").trim().toLowerCase() === "campaign dashboard";
 }
@@ -1496,6 +1527,16 @@ function connectWs() {
         logChat("sys", `◈ OPEN TAB: ${label.slice(0, 60)} — queued`);
         showUrlBar(pendingUrls);  // refresh bar with all pending
       }
+
+    } else if (
+      ev === "file_action" ||
+      ev === "open_file" ||
+      ev === "open_directory" ||
+      ev === "open_folder" ||
+      ev === "reveal_file" ||
+      ev === "show_in_folder"
+    ) {
+      runNativeFileAction({ ...msg, action: msg.action || ev });
 
     } else if (ev === "close_all_tabs") {
       const types = msg.tab_types || ["all"];
