@@ -1,0 +1,8 @@
+pyaudio
+numpy
+websocket-client
+rich
+SpeechRecognition
+playwright
+playwright-stealth
+

@@ -12,15 +12,26 @@ Requirements:
     pip install sounddevice numpy speechrecognition
 """
 
-import os, sys, time, threading, subprocess, tempfile, json, webbrowser
+import os, sys, time, threading, subprocess, tempfile, json, webbrowser, shutil
 import ctypes, ctypes.wintypes
 import platform as _plat
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 _DIR        = os.path.dirname(os.path.abspath(__file__))
-WEB_HTML    = os.path.join(_DIR, "jarvis_web.html")
-VISUAL_HTML = os.path.join(_DIR, "jarvis_visual.html")
-BROWSER_CLIENT = os.path.join(_DIR, "browserClient.py")
+_FROZEN     = bool(getattr(sys, "frozen", False))
+_APP_DIR    = os.path.dirname(sys.executable) if _FROZEN else _DIR
+_RESOURCE_DIR = getattr(sys, "_MEIPASS", _DIR)
+
+def _resource_path(name):
+    for base in (_RESOURCE_DIR, _DIR, _APP_DIR):
+        candidate = os.path.join(base, name)
+        if os.path.exists(candidate):
+            return candidate
+    return os.path.join(_DIR, name)
+
+WEB_HTML    = _resource_path("jarvis_web.html")
+VISUAL_HTML = _resource_path("jarvis_visual.html")
+BROWSER_CLIENT = _resource_path("browserClient.py")
 WAKE_WORDS  = ["hey jarvis", "jarvis", "hey jervis", "hey davis"]
 LAUNCH_COOLDOWN = 4.0
 HTTP_PORT   = 8766
@@ -376,19 +387,40 @@ _visual_proc = None
 _web_proc    = None
 _browser_client_proc = None
 
+def _browser_client_command():
+    exe_name = "browserClient.exe" if _plat.system() == "Windows" else "browserClient"
+    bundled_candidates = [
+        os.path.join(_APP_DIR, "browserClient", exe_name),
+        os.path.join(_APP_DIR, "..", "Resources", "browserClient", exe_name),
+        os.path.join(_RESOURCE_DIR, "browserClient", exe_name),
+    ]
+    for candidate in bundled_candidates:
+        if os.path.exists(candidate):
+            return [candidate]
+
+    if os.path.exists(BROWSER_CLIENT):
+        python_exe = sys.executable
+        if _FROZEN:
+            python_exe = shutil.which("python3") or shutil.which("python") or sys.executable
+        return [python_exe, BROWSER_CLIENT]
+
+    return None
+
 def start_browser_client():
     """Start browserClient.py in the background for browser automation."""
     global _browser_client_proc
     if _browser_client_proc and _browser_client_proc.poll() is None:
         print("  [browser] already running"); return
-    if not os.path.exists(BROWSER_CLIENT):
-        print("  [browser] ⚠  browserClient.py not found"); return
+
+    command = _browser_client_command()
+    if not command:
+        print("  [browser] ⚠  browserClient executable not found"); return
 
     try:
-        _browser_client_proc = subprocess.Popen([sys.executable, BROWSER_CLIENT], cwd=_DIR)
-        print("  [browser] ✅ browserClient.py started")
+        _browser_client_proc = subprocess.Popen(command, cwd=_APP_DIR)
+        print("  [browser] ✅ browserClient started")
     except Exception as e:
-        print(f"  [browser] ⚠  Failed to start browserClient.py: {e}")
+        print(f"  [browser] ⚠  Failed to start browserClient: {e}")
 
 def open_jarvis_visual():
     """Open jarvis_visual.html at the top-center of the screen — the main visible window."""

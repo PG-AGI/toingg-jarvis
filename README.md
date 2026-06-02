@@ -67,6 +67,7 @@
   - [Windows](#windows)
   - [macOS](#macos)
   - [Linux](#linux)
+- [📦 Native Packages](#-native-packages)
 - [🎮 Usage](#-usage)
 - [📄 Data Requirements](#-data-requirements)
 - [🔧 Configuration](#-configuration)
@@ -360,6 +361,46 @@ python3 jarvis_launcher.py
 
 ---
 
+## 📦 Native Packages
+
+JARVIS includes packaging automation for release artifacts on all major desktop platforms.
+
+### GitHub Actions
+
+The workflow at `.github/workflows/package.yml` builds packages on pull requests that touch packaging files, on version tags, and from manual dispatch:
+
+| Platform | Artifact |
+|----------|----------|
+| Windows | NSIS `.exe` installer plus `.zip` fallback |
+| macOS | `.dmg` plus `.app.zip` fallback |
+| Linux | Debian `.deb` plus `.tar.gz` fallback |
+
+The workflow installs PortAudio and Python dependencies, bundles `jarvis_launcher.py` with the HTML assets using PyInstaller, then uploads everything under `dist/packages/`.
+
+### Local packaging
+
+```bash
+python -m pip install -r requirements.txt pyinstaller
+python -m playwright install chromium
+python scripts/build_package.py --platform linux
+```
+
+Use `--platform windows`, `--platform macos`, or `--platform linux` on the matching OS. A dry run is available for CI and review:
+
+```bash
+python scripts/build_package.py --platform linux --dry-run
+```
+
+Optional system tools produce richer native artifacts:
+
+| Platform | Optional tool | Result |
+|----------|---------------|--------|
+| Windows | `makensis` | `.exe` installer |
+| macOS | `hdiutil` | `.dmg` image |
+| Linux | `dpkg-deb` | `.deb` package |
+
+---
+
 ## 🎮 Usage
 
 | Action | Result |
@@ -427,6 +468,9 @@ Key settings in the source files:
 toingg-jarvis/
 ├── 🐍 jarvis_launcher.py     # Wake-word listener, app launcher, HTTP server (:8766)
 ├── 🐍 browserClient.py       # Playwright browser automation client
+├── 📦 requirements.txt        # Python dependencies used by launchers and packaging
+├── 📦 scripts/build_package.py # Cross-platform native package builder
+├── 📦 .github/workflows/package.yml # CI matrix for Windows/macOS/Linux artifacts
 ├── 🌐 jarvis_web.html         # Web frontend — WebSocket audio, terminal UI
 ├── 🎨 jarvis_visual.html      # Animated orb / visual display
 ├── 🖥️  JARVIS.bat              # Windows auto-installer & launcher
@@ -523,6 +567,13 @@ There is currently no automated test suite. Contributions adding unit or integra
 python3 browserClient.py --url wss://prepodapi.toingg.com/api/v3/media/browser/default
 # Should print: Browser launched (headless=False, profile=.browser-profile)
 # Then: WebSocket opened
+```
+
+**Verifying packaging automation:**
+
+```bash
+python3 -m py_compile scripts/build_package.py
+python3 scripts/build_package.py --platform linux --dry-run
 ```
 
 ---

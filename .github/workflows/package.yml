@@ -1,0 +1,79 @@
+name: Build native packages
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    paths:
+      - ".github/workflows/package.yml"
+      - "scripts/build_package.py"
+      - "requirements.txt"
+      - "jarvis_launcher.py"
+      - "browserClient.py"
+      - "jarvis_web.html"
+      - "jarvis_visual.html"
+      - "config.example.json"
+
+jobs:
+  package:
+    name: Package ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows
+            runner: windows-latest
+          - target: macos
+            runner: macos-latest
+          - target: linux
+            runner: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Linux package dependencies
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y portaudio19-dev python3-dev dpkg-dev
+
+      - name: Install macOS package dependencies
+        if: matrix.target == 'macos'
+        run: brew install portaudio pkg-config
+
+      - name: Install Windows package dependencies
+        if: matrix.target == 'windows'
+        shell: pwsh
+        run: choco install nsis -y
+
+      - name: Install Python dependencies
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            export PORTAUDIO_PREFIX="$(brew --prefix portaudio)"
+            export PKG_CONFIG_PATH="$PORTAUDIO_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+            export CFLAGS="-I$PORTAUDIO_PREFIX/include ${CFLAGS:-}"
+            export LDFLAGS="-L$PORTAUDIO_PREFIX/lib ${LDFLAGS:-}"
+          fi
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+          python -m playwright install chromium
+
+      - name: Build package
+        run: python scripts/build_package.py --platform ${{ matrix.target }}
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-${{ matrix.target }}-package
+          path: dist/packages/*
+          if-no-files-found: error
