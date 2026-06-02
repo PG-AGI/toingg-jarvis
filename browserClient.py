@@ -1182,7 +1182,7 @@ class BrowserClient:
     def _on_message(self, ws, raw: str):
         try:
             msg = json.loads(raw)
-            print("Received: ", msg)
+            log.debug("Received: %s", msg)
         except json.JSONDecodeError:
             return
 
