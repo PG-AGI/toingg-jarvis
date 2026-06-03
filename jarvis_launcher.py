@@ -25,6 +25,14 @@ WAKE_WORDS  = ["hey jarvis", "jarvis", "hey jervis", "hey davis"]
 LAUNCH_COOLDOWN = 4.0
 HTTP_PORT   = 8766
 
+COMMON_PATHS = {
+    "home": lambda: os.path.expanduser("~"),
+    "desktop": lambda: os.path.join(os.path.expanduser("~"), "Desktop"),
+    "downloads": lambda: os.path.join(os.path.expanduser("~"), "Downloads"),
+    "documents": lambda: os.path.join(os.path.expanduser("~"), "Documents"),
+    "pictures": lambda: os.path.join(os.path.expanduser("~"), "Pictures"),
+}
+
 # ── shared state (jarvis_web.html POSTs here; jarvis_visual.html polls here) ─
 _http_state      = {"state": "initializing", "text": "", "status": "INITIALIZING..."}
 _http_state_lock = threading.Lock()
@@ -597,6 +605,31 @@ def start_http_server():
                 self.end_headers()
                 self.wfile.write(b'{"ok":true}')
 
+            elif self.path == "/open_path":
+                try:
+                    payload = json.loads(body) if body else {}
+                    if isinstance(payload, str):
+                        payload = {"path": payload}
+                    if not isinstance(payload, dict):
+                        raise ValueError("expected a JSON object or path string")
+                    result = open_native_path(payload.get("path", ""), payload.get("mode", "open"))
+                    self.send_response(200 if result.get("ok") else 400)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps(result).encode())
+                    if result.get("ok"):
+                        print(f"  [file] ok {result.get('mode')} {result.get('path')}")
+                    else:
+                        print(f"  [file] error {result.get('error')}")
+                except Exception as e:
+                    print(f"  [file] open_path error: {e}")
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+
             elif self.path == "/close_tabs":
                 try:
                     payload = json.loads(body) if body else {}
@@ -663,6 +696,88 @@ def start_http_server():
 def resolve_path(path):
     user = os.environ.get("USERNAME", os.environ.get("USER", ""))
     return path.replace("{user}", user)
+
+def resolve_native_path(path=""):
+    if path is None:
+        path = ""
+    path = str(path).strip().strip('"').strip("'")
+    alias = path.lower().replace("\\", "/").strip()
+    if not alias:
+        alias = "home"
+    if alias in COMMON_PATHS:
+        path = COMMON_PATHS[alias]()
+    path = resolve_path(path)
+    path = os.path.expandvars(os.path.expanduser(path))
+    if not os.path.isabs(path):
+        path = os.path.abspath(path)
+    return path
+
+def open_native_path(path="", mode="open"):
+    path = resolve_native_path(path)
+    if not os.path.exists(path):
+        return {"ok": False, "error": f"Path not found: {path}"}
+
+    mode = (mode or "open").lower()
+    system = _plat.system()
+    target = path
+
+    if mode in ("folder", "directory", "browse"):
+        target = path if os.path.isdir(path) else os.path.dirname(path)
+        mode = "open"
+
+    try:
+        if mode in ("reveal", "show", "select"):
+            if system == "Windows":
+                if os.path.isdir(path):
+                    subprocess.Popen(["explorer", path])
+                else:
+                    subprocess.Popen(["explorer", f"/select,{path}"])
+            elif system == "Darwin":
+                if os.path.isdir(path):
+                    subprocess.Popen(["open", path])
+                else:
+                    subprocess.Popen(["open", "-R", path])
+            else:
+                subprocess.Popen(["xdg-open", path if os.path.isdir(path) else os.path.dirname(path)])
+        else:
+            if system == "Windows":
+                os.startfile(target)  # type: ignore[attr-defined]
+            elif system == "Darwin":
+                subprocess.Popen(["open", target])
+            else:
+                subprocess.Popen(["xdg-open", target])
+        return {"ok": True, "path": path, "mode": mode}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "path": path}
+
+def parse_file_command(raw_text):
+    raw_text = raw_text.strip()
+    text = raw_text.lower()
+    mode = "reveal" if any(w in text for w in ("reveal", "show in folder", "show in finder", "show in explorer")) else "open"
+
+    for alias in COMMON_PATHS:
+        phrases = (
+            f"open {alias}", f"open my {alias}", f"open the {alias}",
+            f"show {alias}", f"show my {alias}", f"show the {alias}",
+            f"reveal {alias}", f"go to {alias}", f"navigate to {alias}",
+        )
+        if any(p in text for p in phrases):
+            return alias, mode
+
+    if text in ("open file explorer", "open explorer", "open finder", "open file manager"):
+        return "home", "open"
+
+    prefixes = (
+        "open file", "open folder", "open directory", "open path",
+        "open local file", "open local folder",
+        "show file", "show folder", "show directory", "show path",
+        "reveal file", "reveal folder", "reveal directory", "reveal path",
+        "navigate to", "go to folder",
+    )
+    for prefix in prefixes:
+        if text.startswith(prefix + " "):
+            return raw_text[len(prefix):].strip(), mode
+    return None, None
 
 def find_running_pid(exe_name):
     try:
@@ -811,8 +926,14 @@ def full_launch(source):
     threading.Thread(target=sequence, daemon=True).start()
 
 def handle_command(text):
-    text = text.lower().strip()
+    raw_text = text.strip()
+    text = raw_text.lower().strip()
     print(f"  [cmd] Heard: \"{text}\"")
+    path, mode = parse_file_command(raw_text)
+    if path:
+        print(f"  [cmd] {mode} path: {path}")
+        threading.Thread(target=open_native_path, args=(path, mode), daemon=True).start()
+        return
     if any(w in text for w in WAKE_WORDS) and "open" not in text:
         print("  [cmd] ✅ Wake word → full launch")
         full_launch("wake word")

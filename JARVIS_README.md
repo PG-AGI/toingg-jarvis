@@ -96,6 +96,7 @@ CAMP_ID = "your-campaign-id-here"
 - Press **Enter** to speak — JARVIS listens and responds via audio
 - When JARVIS fetches news/weather/war updates, browser tabs open automatically in a 2×2 grid
 - JARVIS can open specific URLs, scrape article details, and close tabs on command
+- JARVIS can open local files and folders with native Explorer/Finder/file-manager integration
 - Press **Ctrl+C** to stop
 
 ---

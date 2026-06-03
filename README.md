@@ -149,6 +149,7 @@ All three layers run simultaneously and communicate over `localhost:8766`.
 - Smart window focus if app is already running
 - Custom window size + positioning per app
 - Platform-aware paths (Windows / macOS / Linux)
+- Open files and folders in the native file manager from voice commands, web UI, or AI path events
 
 </td>
 </tr>
@@ -370,6 +371,8 @@ python3 jarvis_launcher.py
 | Say **"open Spotify"** | Launches Spotify |
 | Say **"open Chrome"** | Launches Chrome |
 | Say **"open VS Code"** | Launches Visual Studio Code |
+| Say **"open downloads"** | Opens a common local folder in the native file manager |
+| Enter a path in **LOCAL PATH** | Opens or reveals a local file/folder from the web UI |
 | **Ctrl+C** in terminal | Exit JARVIS |
 
 When JARVIS fetches news, weather, or web results — Chrome windows open automatically in a **2×2 grid** and close after the response finishes.

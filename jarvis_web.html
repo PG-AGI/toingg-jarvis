@@ -233,6 +233,54 @@ html, body {
 .url-link-row a:hover { color:var(--cyan); border-bottom-color:var(--cyan); }
 .url-link-status { color:var(--dim); font-size:10px; min-width:60px; text-align:right; }
 
+/* local file manager */
+#file-bar {
+  flex-shrink:0;
+  background:#000d1a;
+  border:1px solid #123252;
+  border-radius:3px;
+  padding:5px 8px;
+  margin:2px 0;
+}
+#file-bar-label {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  color:var(--dim);
+  font-size:10px;
+  letter-spacing:2px;
+  margin-bottom:4px;
+}
+#file-controls {
+  display:grid;
+  grid-template-columns:1fr auto auto;
+  gap:5px;
+}
+#file-path-input {
+  min-width:0;
+  background:#001020;
+  border:1px solid var(--dim2);
+  color:var(--cyan);
+  font-family:inherit;
+  font-size:10px;
+  padding:4px 6px;
+  border-radius:2px;
+  outline:none;
+}
+#file-path-input:focus { border-color:var(--cyan2); }
+#file-controls button {
+  background:none;
+  border:1px solid var(--cyan2);
+  color:var(--cyan2);
+  font-family:inherit;
+  font-size:10px;
+  padding:3px 7px;
+  cursor:pointer;
+  border-radius:2px;
+}
+#file-controls button:hover { color:var(--cyan); border-color:var(--cyan); background:#002030; }
+#file-status { color:var(--dim); letter-spacing:0; }
+
 /* ── API key setup overlay ── */
 #setup-overlay {
   display:none;
@@ -371,6 +419,18 @@ html, body {
       <button onclick="closeAllTabs()" title="Close all tabs">✕ CLOSE ALL</button>
     </div>
     <div id="url-links"></div>
+  </div>
+
+  <div id="file-bar">
+    <div id="file-bar-label">
+      <span>LOCAL PATH</span>
+      <span id="file-status">READY</span>
+    </div>
+    <div id="file-controls">
+      <input id="file-path-input" type="text" placeholder="desktop, downloads, or C:\path\file.txt" spellcheck="false" />
+      <button onclick="openLocalPath('open')" title="Open file or folder">OPEN</button>
+      <button onclick="openLocalPath('reveal')" title="Show file in native file manager">SHOW</button>
+    </div>
   </div>
 
   <!-- STATUS -->
@@ -924,6 +984,8 @@ const SERVER = "http://localhost:8766";
 
 const urlBarEl    = document.getElementById("url-bar");
 const urlLinksEl  = document.getElementById("url-links");
+const filePathInput = document.getElementById("file-path-input");
+const fileStatusEl  = document.getElementById("file-status");
 
 function isCampaignDashboardLabel(label) {
   return String(label || "").trim().toLowerCase() === "campaign dashboard";
@@ -1085,6 +1147,39 @@ async function closeAllTabs() {
   try {
     await fetch(`${SERVER}/close_tabs`, { method: "POST", body: "" });
   } catch (_) {}
+}
+
+async function openLocalPath(mode = "open", pathOverride = "") {
+  const path = String(pathOverride || filePathInput?.value || "").trim() || "home";
+  if (pathOverride && filePathInput) filePathInput.value = path;
+  if (fileStatusEl) fileStatusEl.textContent = mode === "reveal" ? "SHOWING" : "OPENING";
+  try {
+    const res = await fetch(`${SERVER}/open_path`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, mode }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      const err = data.error || "Path could not be opened";
+      if (fileStatusEl) fileStatusEl.textContent = "ERROR";
+      logChat("sys", `LOCAL PATH ERROR: ${err}`);
+      return false;
+    }
+    if (fileStatusEl) fileStatusEl.textContent = mode === "reveal" ? "SHOWN" : "OPENED";
+    logChat("sys", `LOCAL PATH ${mode.toUpperCase()}: ${data.path || path}`);
+    return true;
+  } catch (_) {
+    if (fileStatusEl) fileStatusEl.textContent = "OFFLINE";
+    logChat("sys", "LOCAL PATH ERROR: launcher server is not reachable");
+    return false;
+  }
+}
+
+if (filePathInput) {
+  filePathInput.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") openLocalPath("open");
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1495,6 +1590,14 @@ function connectWs() {
         pendingUrls.push(item);
         logChat("sys", `◈ OPEN TAB: ${label.slice(0, 60)} — queued`);
         showUrlBar(pendingUrls);  // refresh bar with all pending
+      }
+
+    } else if (ev === "open_local_path" || ev === "open_path" || ev === "weestream_local_path") {
+      const path = msg.path || msg.file || msg.folder || msg.directory || "";
+      const mode = msg.mode || (msg.reveal ? "reveal" : "open");
+      if (path) {
+        logChat("sys", `LOCAL PATH: ${String(path).slice(0, 80)}`);
+        openLocalPath(mode, path);
       }
 
     } else if (ev === "close_all_tabs") {
