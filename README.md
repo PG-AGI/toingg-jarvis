@@ -374,6 +374,32 @@ python3 jarvis_launcher.py
 
 When JARVIS fetches news, weather, or web results — Chrome windows open automatically in a **2×2 grid** and close after the response finishes.
 
+### Scheduled browser actions
+
+While `jarvis_launcher.py` is running, you can queue browser actions through the local HTTP server. Scheduled actions stay in memory for the current launcher session.
+
+```bash
+curl -X POST http://localhost:8766/schedule_action \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Open dashboard in 30 seconds",
+    "trigger": { "delay_seconds": 30 },
+    "actions": [
+      { "type": "open_url", "url": "https://calendar.google.com" },
+      { "type": "wait", "seconds": 2 },
+      { "type": "open_url", "url": "https://mail.google.com" }
+    ]
+  }'
+```
+
+Supported triggers:
+
+- `{ "delay_seconds": 30 }`
+- `{ "run_at": "2026-06-03T14:30:00Z" }`
+- `{ "type": "daily", "time": "09:00" }`
+
+Supported action types are `open_url`, `open_tabs`, `wait`, and `close_tabs`. Use `GET /scheduled_actions` to inspect queued actions and `POST /cancel_scheduled_action` with `{ "id": "..." }` to cancel one.
+
 ---
 
 ## 📄 Data Requirements
