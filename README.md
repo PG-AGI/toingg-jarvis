@@ -67,6 +67,7 @@
   - [Windows](#windows)
   - [macOS](#macos)
   - [Linux](#linux)
+- [📦 Packaging and release bundles](#-packaging-and-release-bundles)
 - [🎮 Usage](#-usage)
 - [📄 Data Requirements](#-data-requirements)
 - [🔧 Configuration](#-configuration)
@@ -357,6 +358,25 @@ sudo usermod -aG audio $USER  # then log out & back in
 # Run
 python3 jarvis_launcher.py
 ```
+
+---
+
+## 📦 Packaging and release bundles
+
+To build distributable release artifacts instead of running from source:
+
+```bash
+python -m pip install -r requirements.txt -r requirements-build.txt
+python scripts/package.py
+```
+
+The packaging scaffold keeps runtime behavior unchanged and stages native bundles:
+
+- macOS: `dist/releases/JARVIS.app`
+- Windows: `dist/releases/JARVIS-windows-x86_64.zip`
+- Linux: `dist/releases/JARVIS-linux-x86_64.tar.gz`
+
+Packaged builds store `config.json` in the user config directory, while the launcher and browser client remain separate executables in the bundle.
 
 ---
 

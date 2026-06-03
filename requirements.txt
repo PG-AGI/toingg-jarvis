@@ -1,0 +1,8 @@
+# Runtime dependencies for J.A.R.V.I.S.
+numpy>=1.26
+pyaudio>=0.2.14
+rich>=13.7
+SpeechRecognition>=3.10.4
+websocket-client>=1.8.0
+playwright>=1.48.0
+playwright-stealth>=2.0.0

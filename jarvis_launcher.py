@@ -17,10 +17,37 @@ import ctypes, ctypes.wintypes
 import platform as _plat
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
-_DIR        = os.path.dirname(os.path.abspath(__file__))
-WEB_HTML    = os.path.join(_DIR, "jarvis_web.html")
-VISUAL_HTML = os.path.join(_DIR, "jarvis_visual.html")
-BROWSER_CLIENT = os.path.join(_DIR, "browserClient.py")
+def _resource_dir():
+    """Return the directory that holds packaged assets."""
+    return getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+
+
+def _runtime_dir():
+    """Return the writable directory next to the launcher executable."""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def _config_dir():
+    """Return the directory where user-editable config files should live."""
+    if getattr(sys, "frozen", False):
+        system = _plat.system()
+        if system == "Windows":
+            root = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~\\AppData\\Local")
+            return os.path.join(root, "ToinggJarvis")
+        if system == "Darwin":
+            return os.path.expanduser("~/Library/Application Support/Toingg Jarvis")
+        return os.path.expanduser("~/.config/toingg-jarvis")
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+_RESOURCE_DIR = _resource_dir()
+_RUNTIME_DIR  = _runtime_dir()
+WEB_HTML    = os.path.join(_RESOURCE_DIR, "jarvis_web.html")
+VISUAL_HTML = os.path.join(_RESOURCE_DIR, "jarvis_visual.html")
+BROWSER_CLIENT = os.path.join(_RESOURCE_DIR, "browserClient.py")
+CONFIG_JSON = os.path.join(_config_dir(), "config.json")
 WAKE_WORDS  = ["hey jarvis", "jarvis", "hey jervis", "hey davis"]
 LAUNCH_COOLDOWN = 4.0
 HTTP_PORT   = 8766
@@ -381,14 +408,25 @@ def start_browser_client():
     global _browser_client_proc
     if _browser_client_proc and _browser_client_proc.poll() is None:
         print("  [browser] already running"); return
-    if not os.path.exists(BROWSER_CLIENT):
-        print("  [browser] ⚠  browserClient.py not found"); return
-
+    if getattr(sys, "frozen", False):
+        exe_name = "browserClient.exe" if _plat.system() == "Windows" else "browserClient"
+        frozen_client = os.path.join(_RUNTIME_DIR, exe_name)
+        if not os.path.exists(frozen_client):
+            print(f"  [browser] ⚠  {exe_name} not found next to launcher"); return
+        command = [frozen_client]
+        cwd = _RUNTIME_DIR
+        label = exe_name
+    else:
+        if not os.path.exists(BROWSER_CLIENT):
+            print("  [browser] ⚠  browserClient.py not found"); return
+        command = [sys.executable, BROWSER_CLIENT]
+        cwd = _RESOURCE_DIR
+        label = "browserClient.py"
     try:
-        _browser_client_proc = subprocess.Popen([sys.executable, BROWSER_CLIENT], cwd=_DIR)
-        print("  [browser] ✅ browserClient.py started")
+        _browser_client_proc = subprocess.Popen(command, cwd=cwd)
+        print(f"  [browser] ✅ {label} started")
     except Exception as e:
-        print(f"  [browser] ⚠  Failed to start browserClient.py: {e}")
+        print(f"  [browser] ⚠  Failed to start browser client: {e}")
 
 def open_jarvis_visual():
     """Open jarvis_visual.html at the top-center of the screen — the main visible window."""
@@ -523,7 +561,7 @@ def start_http_server():
             elif self.path in ("/visual", "/visual.html"):
                 self._serve_file(VISUAL_HTML)
             elif self.path == "/config.json":
-                self._serve_file(os.path.join(_DIR, "config.json"), "application/json")
+                self._serve_file(CONFIG_JSON, "application/json")
             elif self.path == "/state":
                 with _http_state_lock:
                     data = json.dumps(_http_state).encode()
@@ -620,7 +658,7 @@ def start_http_server():
                     token = payload.get("token", "").strip()
                     if not token:
                         raise ValueError("token is empty")
-                    cfg_path = os.path.join(_DIR, "config.json")
+                    cfg_path = CONFIG_JSON
                     try:
                         with open(cfg_path, "r") as f:
                             cfg = json.load(f)
@@ -875,7 +913,7 @@ def _is_valid_token(token):
     return len(token) >= 20 and token.lower() not in _PLACEHOLDER_TOKENS
 
 def _load_token():
-    cfg_path = os.path.join(_DIR, "config.json")
+    cfg_path = CONFIG_JSON
     try:
         with open(cfg_path, "r") as f:
             return json.load(f).get("TOKEN", "").strip()
@@ -883,7 +921,8 @@ def _load_token():
         return ""
 
 def _save_token(token):
-    cfg_path = os.path.join(_DIR, "config.json")
+    cfg_path = CONFIG_JSON
+    os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
     try:
         with open(cfg_path, "r") as f:
             cfg = json.load(f)
