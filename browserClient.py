@@ -21,6 +21,8 @@ import sys
 import threading
 import time
 import base64
+from urllib.parse import quote
+from urllib.request import ProxyHandler, build_opener
 
 import websocket
 from playwright.sync_api import sync_playwright, Page, Playwright
@@ -44,6 +46,10 @@ except ImportError:
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [BROWSER] %(message)s")
 log = logging.getLogger(__name__)
+UPLOAD_RESOLVE_URL = os.environ.get(
+    "JARVIS_UPLOAD_RESOLVE_URL",
+    "http://localhost:8766/api/uploads",
+)
 
 # ---------------------------------------------------------------------------
 # Stealth init script — patches common fingerprint leaks that trigger Google
@@ -665,6 +671,65 @@ class BrowserClient:
                 return f"Filled '{selector}' with value via {fallback['target']} fallback"
             raise RuntimeError(f"{fill_error}; fallback failed: {fallback.get('error')}")
 
+    def _resolve_upload_token(self, token: str) -> str:
+        url = f"{UPLOAD_RESOLVE_URL.rstrip('/')}/{quote(token)}"
+        opener = build_opener(ProxyHandler({}))
+        with opener.open(url, timeout=5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        if not payload.get("ok"):
+            raise RuntimeError(payload.get("error", "Upload token resolution failed"))
+
+        path = payload.get("file", {}).get("path")
+        if not path:
+            raise RuntimeError("Upload token response did not include a file path")
+        return path
+
+    def _input_file_paths(self, params: dict) -> str | list[str]:
+        items = []
+
+        for key in ("path", "file", "token"):
+            if key in params:
+                items.append(params[key])
+
+        for key in ("paths", "files", "tokens"):
+            value = params.get(key)
+            if value is None:
+                continue
+            if isinstance(value, list):
+                items.extend(value)
+            else:
+                items.append(value)
+
+        if not items:
+            raise RuntimeError("input_file requires path/file/token or paths/files/tokens")
+
+        paths = []
+        for item in items:
+            if isinstance(item, dict):
+                if "path" in item:
+                    path = item["path"]
+                elif "token" in item:
+                    path = self._resolve_upload_token(str(item["token"]))
+                else:
+                    raise RuntimeError("input_file file objects must include path or token")
+            elif isinstance(item, str):
+                path = item
+            else:
+                raise RuntimeError("input_file entries must be strings or objects")
+
+            if item == params.get("token") or (
+                isinstance(item, str) and item in params.get("tokens", [])
+            ):
+                path = self._resolve_upload_token(path)
+
+            expanded = os.path.abspath(os.path.expanduser(path))
+            if not os.path.isfile(expanded):
+                raise FileNotFoundError(f"Input file does not exist: {expanded}")
+            paths.append(expanded)
+
+        return paths[0] if len(paths) == 1 else paths
+
     def _execute(self, action: str, params: dict) -> dict:
         """Execute a single Playwright action and return a result dict."""
         page = self._select_active_page()
@@ -708,6 +773,13 @@ class BrowserClient:
                     self._human_delay(100, 400)
                     result = self._fill_field(selector, value, params.get("timeout", 10000))
                 return {"success": True, "result": result}
+
+            elif action in ("input_file", "set_input_files"):
+                selector = params["selector"]
+                files = self._input_file_paths(params)
+                page.locator(selector).set_input_files(files, timeout=params.get("timeout", 10000))
+                count = len(files) if isinstance(files, list) else 1
+                return {"success": True, "result": f"Set {count} file(s) on '{selector}'"}
 
             elif action == "type":
                 value = params.get("value", params.get("text", ""))

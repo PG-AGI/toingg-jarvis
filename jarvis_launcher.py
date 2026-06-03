@@ -12,7 +12,7 @@ Requirements:
     pip install sounddevice numpy speechrecognition
 """
 
-import os, sys, time, threading, subprocess, tempfile, json, webbrowser
+import os, sys, time, threading, subprocess, tempfile, json, webbrowser, uuid
 import ctypes, ctypes.wintypes
 import platform as _plat
 
@@ -28,6 +28,10 @@ HTTP_PORT   = 8766
 # ── shared state (jarvis_web.html POSTs here; jarvis_visual.html polls here) ─
 _http_state      = {"state": "initializing", "text": "", "status": "INITIALIZING..."}
 _http_state_lock = threading.Lock()
+UPLOAD_TTL_SECONDS = 3600
+UPLOAD_DIR = os.path.join(tempfile.gettempdir(), "jarvis_uploads")
+_uploaded_files = {}
+_uploaded_files_lock = threading.Lock()
 
 # ── SLOT WINDOW CONFIG (mirrors jarvis_terminal.py) ───────────────────────────
 URL_WIN_W  = 860
@@ -371,6 +375,88 @@ def close_all_url_windows(auto=False):
         _url_slot_wins.pop(slot, None)
         _url_slot_modes.pop(slot, None)
 
+def _safe_upload_name(filename):
+    name = os.path.basename(str(filename).replace("\\", "/"))
+    cleaned = "".join(ch if ch.isalnum() or ch in ("-", "_", ".") else "_" for ch in name)
+    return cleaned or "upload.bin"
+
+def _cleanup_uploaded_files(now=None):
+    now = now or time.time()
+    expired = []
+    with _uploaded_files_lock:
+        for token, record in list(_uploaded_files.items()):
+            if record["expires_at"] <= now:
+                expired.append((token, record["path"]))
+                _uploaded_files.pop(token, None)
+
+    for _, path in expired:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+
+def _parse_multipart_uploads(content_type, body):
+    from email.parser import BytesParser
+    from email.policy import default
+
+    if not content_type.startswith("multipart/form-data"):
+        raise ValueError("Content-Type must be multipart/form-data")
+
+    message = BytesParser(policy=default).parsebytes(
+        f"Content-Type: {content_type}\r\n\r\n".encode("utf-8") + body
+    )
+    if not message.is_multipart():
+        raise ValueError("Multipart payload is invalid")
+
+    files = []
+    for part in message.iter_parts():
+        filename = part.get_filename()
+        if not filename:
+            continue
+        data = part.get_payload(decode=True)
+        if data is None:
+            continue
+        files.append({"filename": _safe_upload_name(filename), "data": data})
+
+    if not files:
+        raise ValueError("No file parts found in upload")
+    return files
+
+def _store_uploaded_files(files):
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    expires_at = time.time() + UPLOAD_TTL_SECONDS
+    stored = []
+
+    with _uploaded_files_lock:
+        for item in files:
+            token = uuid.uuid4().hex
+            path = os.path.join(UPLOAD_DIR, f"{token}_{item['filename']}")
+            with open(path, "wb") as f:
+                f.write(item["data"])
+
+            record = {
+                "token": token,
+                "filename": item["filename"],
+                "path": path,
+                "size": len(item["data"]),
+                "expires_at": expires_at,
+            }
+            _uploaded_files[token] = record
+            stored.append(record.copy())
+
+    return stored
+
+def _uploaded_file_record(token):
+    _cleanup_uploaded_files()
+    with _uploaded_files_lock:
+        record = _uploaded_files.get(token)
+        if record is None:
+            raise FileNotFoundError("Upload token not found or expired")
+        if not os.path.exists(record["path"]):
+            _uploaded_files.pop(token, None)
+            raise FileNotFoundError("Uploaded file is missing")
+        return record.copy()
+
 # ── JARVIS WINDOWS ────────────────────────────────────────────────────────────
 _visual_proc = None
 _web_proc    = None
@@ -500,6 +586,13 @@ def start_http_server():
             self.send_header("Access-Control-Allow-Headers", "Content-Type")
             self.send_header("Cache-Control", "no-store")
 
+        def _json(self, status, payload):
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self._cors()
+            self.end_headers()
+            self.wfile.write(json.dumps(payload).encode("utf-8"))
+
         def do_OPTIONS(self):
             self.send_response(200)
             self._cors()
@@ -532,6 +625,24 @@ def start_http_server():
                 self._cors()
                 self.end_headers()
                 self.wfile.write(data)
+            elif self.path.startswith("/api/uploads/"):
+                from urllib.parse import unquote
+
+                token = unquote(self.path.rsplit("/", 1)[-1])
+                try:
+                    record = _uploaded_file_record(token)
+                    self._json(200, {
+                        "ok": True,
+                        "file": {
+                            "token": record["token"],
+                            "filename": record["filename"],
+                            "path": record["path"],
+                            "size": record["size"],
+                            "expiresAt": record["expires_at"],
+                        },
+                    })
+                except FileNotFoundError as e:
+                    self._json(404, {"ok": False, "error": str(e)})
             else:
                 self.send_response(404); self.end_headers()
 
@@ -642,6 +753,27 @@ def start_http_server():
                     self._cors()
                     self.end_headers()
                     self.wfile.write(json.dumps({"error": str(e)}).encode())
+
+            elif self.path == "/api/uploads":
+                try:
+                    _cleanup_uploaded_files()
+                    files = _parse_multipart_uploads(self.headers.get("Content-Type", ""), body)
+                    stored = _store_uploaded_files(files)
+                    self._json(201, {
+                        "ok": True,
+                        "files": [
+                            {
+                                "token": item["token"],
+                                "filename": item["filename"],
+                                "path": item["path"],
+                                "size": item["size"],
+                                "expiresAt": item["expires_at"],
+                            }
+                            for item in stored
+                        ],
+                    })
+                except ValueError as e:
+                    self._json(400, {"ok": False, "error": str(e)})
 
             else:
                 self.send_response(404); self.end_headers()
