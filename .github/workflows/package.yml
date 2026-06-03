@@ -1,0 +1,61 @@
+name: package
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "jarvis_launcher.py"
+      - "browserClient.py"
+      - "JARVIS*.sh"
+      - "JARVIS.bat"
+      - "JARVIS.command"
+      - "requirements*.txt"
+      - "packaging/**"
+      - "README.md"
+      - "JARVIS_README.md"
+      - "config.example.json"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y portaudio19-dev
+
+      - name: Install macOS system deps
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install portaudio
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Package release bundle
+        run: python scripts/package.py
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS-${{ runner.os }}
+          path: dist/releases/*
