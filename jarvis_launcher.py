@@ -12,7 +12,7 @@ Requirements:
     pip install sounddevice numpy speechrecognition
 """
 
-import os, sys, time, threading, subprocess, tempfile, json, webbrowser
+import os, sys, time, threading, subprocess, tempfile, json, webbrowser, shutil
 import ctypes, ctypes.wintypes
 import platform as _plat
 
@@ -465,6 +465,56 @@ def open_jarvis_web_bg():
         webbrowser.open(url)
 
 # ── HTTP SERVER ───────────────────────────────────────────────────────────────
+def _default_file_opener():
+    for cmd in ("xdg-open", "gio", "gnome-open", "kde-open"):
+        found = shutil.which(cmd)
+        if found:
+            return [found] if cmd != "gio" else [found, "open"]
+    raise RuntimeError("No Linux file opener found; install xdg-open or gio")
+
+def _normalize_local_path(path):
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("path is required")
+    return os.path.abspath(os.path.expandvars(os.path.expanduser(path.strip())))
+
+def _open_default(path):
+    if sys.platform.startswith("win"):
+        os.startfile(path)  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        subprocess.Popen(_default_file_opener() + [path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+def open_local_path(action, path):
+    """Open a local file, directory, or parent folder using the native file manager."""
+    action = str(action or "").strip()
+    target = _normalize_local_path(path)
+
+    if action == "open_directory":
+        if not os.path.isdir(target):
+            raise FileNotFoundError(f"directory not found: {target}")
+        _open_default(target)
+
+    elif action == "open_file":
+        if not os.path.isfile(target):
+            raise FileNotFoundError(f"file not found: {target}")
+        _open_default(target)
+
+    elif action == "reveal_file":
+        if not os.path.exists(target):
+            raise FileNotFoundError(f"path not found: {target}")
+        if sys.platform.startswith("win"):
+            subprocess.Popen(["explorer", f"/select,{target}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", target], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            _open_default(target if os.path.isdir(target) else os.path.dirname(target))
+
+    else:
+        raise ValueError("action must be open_directory, reveal_file, or open_file")
+
+    return {"ok": True, "action": action, "path": target}
+
 _http_started = False
 
 def _kill_port(port):
@@ -517,6 +567,13 @@ def start_http_server():
                 self.send_response(404); self.end_headers()
                 self.wfile.write(os.path.basename(path).encode() + b" not found")
 
+        def _json(self, payload, status=200):
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self._cors()
+            self.end_headers()
+            self.wfile.write(json.dumps(payload).encode())
+
         def do_GET(self):
             if self.path in ("/", "/index.html"):
                 self._serve_file(WEB_HTML)
@@ -552,6 +609,19 @@ def start_http_server():
                 self._cors()
                 self.end_headers()
                 self.wfile.write(b'{"ok":true}')
+
+            elif self.path in ("/open_path", "/open_directory", "/reveal_file", "/open_file"):
+                try:
+                    payload = json.loads(body) if body else {}
+                    if not isinstance(payload, dict):
+                        raise ValueError("JSON object expected")
+                    action = payload.get("action") if self.path == "/open_path" else self.path.lstrip("/")
+                    result = open_local_path(action, payload.get("path"))
+                    print(f"  [file] opened {result['action']}: {result['path']}")
+                    self._json(result)
+                except Exception as e:
+                    print(f"  [file] open_path error: {e}")
+                    self._json({"ok": False, "error": str(e)}, 400)
 
             elif self.path == "/open_tabs":
                 try:

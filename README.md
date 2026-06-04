@@ -376,6 +376,18 @@ When JARVIS fetches news, weather, or web results — Chrome windows open automa
 
 ---
 
+### Native File Manager Actions
+
+The launcher exposes local file manager actions through `POST http://localhost:8766/open_path`.
+
+```json
+{"action":"open_directory","path":"~/Projects/Jarvis"}
+```
+
+Supported actions are `open_directory`, `reveal_file`, and `open_file`. They use File Explorer on Windows, Finder on macOS, and the default file opener on Linux.
+
+---
+
 ## 📄 Data Requirements
 
 JARVIS requires a `config.json` file at the project root. Copy the template and fill in your credentials:
