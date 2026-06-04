@@ -25,6 +25,8 @@ import base64
 import websocket
 from playwright.sync_api import sync_playwright, Page, Playwright
 
+from jarvis_launcher import FILE_MANAGER_ACTIONS, open_local_file_manager
+
 # playwright-stealth >= 2.x uses `Stealth`; older 1.x used `stealth_sync`.
 try:
     from playwright_stealth import Stealth
@@ -667,11 +669,17 @@ class BrowserClient:
 
     def _execute(self, action: str, params: dict) -> dict:
         """Execute a single Playwright action and return a result dict."""
-        page = self._select_active_page()
-        if page is None:
-            return {"success": False, "error": "Browser page not initialised"}
-
         try:
+            if action in FILE_MANAGER_ACTIONS:
+                raw_path = params.get("path")
+                # 文件管理器动作不依赖浏览器页面，先处理可以避免未打开页面时误失败。
+                open_local_file_manager(action, raw_path)
+                return {"success": True, "result": f"Executed {action} for {raw_path}"}
+
+            page = self._select_active_page()
+            if page is None:
+                return {"success": False, "error": "Browser page not initialised"}
+
             if action == "navigate":
                 url = params["url"]
                 page.goto(url, timeout=params.get("timeout", 30000))
