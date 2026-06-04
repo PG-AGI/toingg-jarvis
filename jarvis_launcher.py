@@ -532,6 +532,61 @@ def start_http_server():
                 self._cors()
                 self.end_headers()
                 self.wfile.write(data)
+            elif self.path == "/open_file_manager":
+                try:
+                    payload = json.loads(body) if body else {}
+                    action = payload.get("action", "open")
+                    path   = (payload.get("path", "") or "").strip()
+                    if action == "reveal" and path:
+                        abs_path = _validate_path(path)
+                        threading.Thread(target=reveal_file, args=(abs_path,), daemon=True).start()
+                        msg = f"Revealing: {abs_path}"
+                    elif action == "open_file" and path:
+                        abs_path = _validate_path(path)
+                        threading.Thread(target=open_file_with_default_app, args=(abs_path,), daemon=True).start()
+                        msg = f"Opening file: {abs_path}"
+                    else:
+                        dir_path = _validate_path(path) if path else None
+                        threading.Thread(target=open_file_manager, args=(dir_path,), daemon=True).start()
+                        msg = f"Opening file manager: {dir_path or 'home'}"
+                    self.send_response(200)
+                except FileNotFoundError as e:
+                    self.send_response(404)
+                    msg = str(e)
+                except Exception as e:
+                    self.send_response(400)
+                    msg = str(e)
+                self.send_header("Content-Type", "application/json")
+                self._cors()
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": True, "message": msg}).encode())
+
+            elif self.path.startswith("/open_file_manager?"):
+                qs = parse_qs(urlparse(self.path).query)
+                action = qs.get("action", ["open"])[0]
+                path   = (qs.get("path", [""])[0] or "").strip()
+                try:
+                    if action == "reveal" and path:
+                        abs_path = _validate_path(path)
+                        threading.Thread(target=reveal_file, args=(abs_path,), daemon=True).start()
+                        msg = f"Revealing: {abs_path}"
+                    elif action == "open_file" and path:
+                        abs_path = _validate_path(path)
+                        threading.Thread(target=open_file_with_default_app, args=(abs_path,), daemon=True).start()
+                        msg = f"Opening file: {abs_path}"
+                    else:
+                        dir_path = _validate_path(path) if path else None
+                        threading.Thread(target=open_file_manager, args=(dir_path,), daemon=True).start()
+                        msg = f"Opening file manager: {dir_path or 'home'}"
+                    self.send_response(200)
+                except Exception as e:
+                    self.send_response(400)
+                    msg = str(e)
+                self.send_header("Content-Type", "application/json")
+                self._cors()
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": True, "message": msg}).encode())
+
             else:
                 self.send_response(404); self.end_headers()
 
@@ -642,6 +697,61 @@ def start_http_server():
                     self._cors()
                     self.end_headers()
                     self.wfile.write(json.dumps({"error": str(e)}).encode())
+
+            elif self.path == "/open_file_manager":
+                try:
+                    payload = json.loads(body) if body else {}
+                    action = payload.get("action", "open")
+                    path   = (payload.get("path", "") or "").strip()
+                    if action == "reveal" and path:
+                        abs_path = _validate_path(path)
+                        threading.Thread(target=reveal_file, args=(abs_path,), daemon=True).start()
+                        msg = f"Revealing: {abs_path}"
+                    elif action == "open_file" and path:
+                        abs_path = _validate_path(path)
+                        threading.Thread(target=open_file_with_default_app, args=(abs_path,), daemon=True).start()
+                        msg = f"Opening file: {abs_path}"
+                    else:
+                        dir_path = _validate_path(path) if path else None
+                        threading.Thread(target=open_file_manager, args=(dir_path,), daemon=True).start()
+                        msg = f"Opening file manager: {dir_path or 'home'}"
+                    self.send_response(200)
+                except FileNotFoundError as e:
+                    self.send_response(404)
+                    msg = str(e)
+                except Exception as e:
+                    self.send_response(400)
+                    msg = str(e)
+                self.send_header("Content-Type", "application/json")
+                self._cors()
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": True, "message": msg}).encode())
+
+            elif self.path.startswith("/open_file_manager?"):
+                qs = parse_qs(urlparse(self.path).query)
+                action = qs.get("action", ["open"])[0]
+                path   = (qs.get("path", [""])[0] or "").strip()
+                try:
+                    if action == "reveal" and path:
+                        abs_path = _validate_path(path)
+                        threading.Thread(target=reveal_file, args=(abs_path,), daemon=True).start()
+                        msg = f"Revealing: {abs_path}"
+                    elif action == "open_file" and path:
+                        abs_path = _validate_path(path)
+                        threading.Thread(target=open_file_with_default_app, args=(abs_path,), daemon=True).start()
+                        msg = f"Opening file: {abs_path}"
+                    else:
+                        dir_path = _validate_path(path) if path else None
+                        threading.Thread(target=open_file_manager, args=(dir_path,), daemon=True).start()
+                        msg = f"Opening file manager: {dir_path or 'home'}"
+                    self.send_response(200)
+                except Exception as e:
+                    self.send_response(400)
+                    msg = str(e)
+                self.send_header("Content-Type", "application/json")
+                self._cors()
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": True, "message": msg}).encode())
 
             else:
                 self.send_response(404); self.end_headers()
@@ -1014,3 +1124,68 @@ def main():
 
 if __name__ == "__main__":
     main()
+# ── FILE MANAGER HELPERS ──────────────────────────────────────────────────────
+_SYSTEM = platform.system().lower()
+
+def _get_file_manager_cmd(path=None, reveal=None):
+    """Return a list of args to open native file manager."""
+    target = str(path) if path else None
+    if _SYSTEM == "darwin":
+        if reveal:
+            return ["open", "-R", reveal]
+        if target:
+            return ["open", target]
+        return ["open", "."]
+    elif _SYSTEM == "windows":
+        if reveal:
+            return ["explorer", "/select,", os.path.normpath(reveal)]
+        if target:
+            return ["explorer", os.path.normpath(target)]
+        return ["explorer"]
+    else:  # Linux
+        fm = shutil.which("nautilus") or shutil.which("dolphin") or shutil.which("nemo") or shutil.which("thunar") or "xdg-open"
+        if reveal:
+            return [fm, "--select", reveal] if fm != "xdg-open" else ["xdg-open", os.path.dirname(reveal)]
+        return [fm, target] if target else [fm, "."]
+
+def open_file_manager(path=None):
+    """Open the native file manager."""
+    try:
+        args = _get_file_manager_cmd(path=path)
+        subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        loc = path or "home"
+        print(f"  [fm] ✅ Opened file manager → {loc}")
+    except Exception as e:
+        print(f"  [fm] ⚠ Failed to open file manager: {e}")
+
+def reveal_file(path):
+    """Reveal a file in the native file manager."""
+    try:
+        args = _get_file_manager_cmd(reveal=path)
+        subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"  [fm] ✅ Revealed: {path}")
+    except Exception as e:
+        print(f"  [fm] ⚠ Failed to reveal file: {e}")
+
+def open_file_with_default_app(path):
+    """Open a file with the OS default application."""
+    try:
+        if _SYSTEM == "darwin":
+            subprocess.Popen(["open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif _SYSTEM == "windows":
+            os.startfile(path)
+        else:
+            subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"  [fm] ✅ Opened file: {path}")
+    except Exception as e:
+        print(f"  [fm] ⚠ Failed to open file: {e}")
+
+def _validate_path(path):
+    """Validate and resolve a path. Expand ~ and {user}."""
+    resolved = resolve_path(os.path.expanduser(str(path)))
+    abs_path = os.path.abspath(resolved)
+    if not os.path.exists(abs_path):
+        raise FileNotFoundError(f"Path does not exist: {abs_path}")
+    return abs_path
+
+
