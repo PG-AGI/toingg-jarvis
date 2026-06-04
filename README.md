@@ -232,6 +232,17 @@ cp config.example.json config.json
 
 Edit `config.json` with your Toingg token (see [Data Requirements](#-data-requirements)).
 
+### Native release packages
+
+Maintainers can build native installer outputs from staged release bundles using the templates in [`packaging/`](packaging/README.md):
+
+- CI: GitHub Actions matrix template in `packaging/github-actions/package.yml` builds Windows, Linux, and macOS artifacts.
+- Windows: Inno Setup `.exe` installer template.
+- Linux: Debian/Ubuntu `.deb` build script.
+- macOS: `.dmg` build script for a staged `.app` bundle.
+
+These packaging templates are intended for release automation and do not change the normal local development flow.
+
 ---
 
 ## ⚙️ Environment Setup
