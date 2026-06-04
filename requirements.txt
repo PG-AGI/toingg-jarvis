@@ -1,0 +1,9 @@
+pyaudio>=0.2.14
+numpy>=1.24
+websocket-client>=1.8
+rich>=13.7
+SpeechRecognition>=3.10
+playwright>=1.44
+playwright-stealth>=1.0
+pyinstaller>=6.7
+pyobjc-framework-Cocoa>=10.3; sys_platform == "darwin"
