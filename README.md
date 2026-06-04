@@ -374,6 +374,14 @@ python3 jarvis_launcher.py
 
 When JARVIS fetches news, weather, or web results — Chrome windows open automatically in a **2×2 grid** and close after the response finishes.
 
+Browser automation can also open local files and folders through native OS tools:
+
+```json
+{"action": "open_directory", "params": {"path": "/Users/me/Projects/Jarvis"}}
+{"action": "reveal_file", "params": {"path": "/Users/me/Downloads/report.pdf"}}
+{"action": "open_file", "params": {"path": "/Users/me/Documents/notes.txt"}}
+```
+
 ---
 
 ## 📄 Data Requirements
@@ -503,7 +511,11 @@ JARVIS is composed of three cooperating processes that communicate over `localho
 
 ## 🧪 Testing
 
-There is currently no automated test suite. Contributions adding unit or integration tests are **very welcome** and carry bonus reward points (see [REWARD_SYSTEM.md](REWARD_SYSTEM.md)).
+Run the focused unit tests for local file-manager actions:
+
+```bash
+python3 -m unittest tests.test_file_manager_actions
+```
 
 **Manual smoke-test checklist:**
 

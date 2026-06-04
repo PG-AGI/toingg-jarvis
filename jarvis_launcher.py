@@ -12,7 +12,7 @@ Requirements:
     pip install sounddevice numpy speechrecognition
 """
 
-import os, sys, time, threading, subprocess, tempfile, json, webbrowser
+import os, sys, time, threading, subprocess, tempfile, json, webbrowser, shutil
 import ctypes, ctypes.wintypes
 import platform as _plat
 
@@ -88,6 +88,60 @@ PROCESS_NAMES = {
     "visual studio code": "Code.exe",
     "spotify":            "Spotify.exe",
 }
+
+FILE_MANAGER_ACTIONS = {"open_directory", "reveal_file", "open_file"}
+
+# ── LOCAL FILE MANAGER ────────────────────────────────────────────────────────
+def _normalize_file_manager_path(raw_path):
+    """Normalize a local path before handing it to the OS file manager."""
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise ValueError("path is required for file manager action")
+
+    # 只展开本机路径，不接受空字符串，避免把错误请求交给系统打开。
+    local_path = os.path.abspath(os.path.expanduser(raw_path.strip()))
+    if not os.path.exists(local_path):
+        raise FileNotFoundError(f"local path does not exist: {local_path}")
+    return local_path
+
+def build_file_manager_command(action, raw_path):
+    """Build the platform command for opening or revealing a local path."""
+    action = str(action or "").strip()
+    if action not in FILE_MANAGER_ACTIONS:
+        raise ValueError(f"unsupported file manager action: {action}")
+
+    local_path = _normalize_file_manager_path(raw_path)
+    if action == "open_directory" and not os.path.isdir(local_path):
+        raise NotADirectoryError(f"directory path required: {local_path}")
+    if action == "open_file" and not os.path.isfile(local_path):
+        raise IsADirectoryError(f"file path required: {local_path}")
+
+    system_name = _plat.system()
+    if system_name == "Darwin":
+        if action == "reveal_file":
+            return ["open", "-R", local_path]
+        return ["open", local_path]
+
+    if system_name == "Windows":
+        if action == "open_directory":
+            return ["explorer", local_path]
+        if action == "reveal_file":
+            return ["explorer", f"/select,{local_path}"]
+        return ["cmd", "/c", "start", "", local_path]
+
+    # Linux 没有统一的“选中文件”协议；有 Nautilus 时优先选中，否则打开所在目录。
+    if action == "reveal_file":
+        if shutil.which("nautilus"):
+            return ["nautilus", "--select", local_path]
+        target_dir = local_path if os.path.isdir(local_path) else os.path.dirname(local_path)
+        return ["xdg-open", target_dir]
+    return ["xdg-open", local_path]
+
+def open_local_file_manager(action, raw_path):
+    """Open the native file manager or default app for a validated local path."""
+    command = build_file_manager_command(action, raw_path)
+    # 这里是真正触发系统外部应用的边界，调用前已完成路径和动作校验。
+    subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return command
 
 # ── CHROME FINDER (cross-platform) ───────────────────────────────────────────
 def find_chrome():
@@ -596,6 +650,27 @@ def start_http_server():
                 self._cors()
                 self.end_headers()
                 self.wfile.write(b'{"ok":true}')
+
+            elif self.path == "/file_manager":
+                try:
+                    payload = json.loads(body) if body else {}
+                    action = payload.get("action")
+                    raw_path = payload.get("path")
+                    # 先校验动作和路径，再异步交给系统文件管理器处理。
+                    open_local_file_manager(action, raw_path)
+                    print(f"  [file] ✅ {action}: {raw_path}")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(b'{"ok":true}')
+                except Exception as e:
+                    print(f"  [file] ⚠  file_manager error: {e}")
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": str(e)}).encode())
 
             elif self.path == "/close_tabs":
                 try:
