@@ -16,11 +16,21 @@ import os, sys, time, threading, subprocess, tempfile, json, webbrowser
 import ctypes, ctypes.wintypes
 import platform as _plat
 
+from backend_config import (
+    BACKEND_PIPECAT_GEMINI,
+    build_web_config,
+    load_runtime_config,
+    requires_toingg_token,
+    selected_backend,
+)
+
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 _DIR        = os.path.dirname(os.path.abspath(__file__))
 WEB_HTML    = os.path.join(_DIR, "jarvis_web.html")
 VISUAL_HTML = os.path.join(_DIR, "jarvis_visual.html")
 BROWSER_CLIENT = os.path.join(_DIR, "browserClient.py")
+PIPECAT_GEMINI_PROXY = os.path.join(_DIR, "pipecat_gemini_proxy.py")
+CONFIG_JSON = os.path.join(_DIR, "config.json")
 WAKE_WORDS  = ["hey jarvis", "jarvis", "hey jervis", "hey davis"]
 LAUNCH_COOLDOWN = 4.0
 HTTP_PORT   = 8766
@@ -375,6 +385,7 @@ def close_all_url_windows(auto=False):
 _visual_proc = None
 _web_proc    = None
 _browser_client_proc = None
+_pipecat_gemini_proc = None
 
 def start_browser_client():
     """Start browserClient.py in the background for browser automation."""
@@ -389,6 +400,40 @@ def start_browser_client():
         print("  [browser] ✅ browserClient.py started")
     except Exception as e:
         print(f"  [browser] ⚠  Failed to start browserClient.py: {e}")
+
+def _load_config_dict():
+    return load_runtime_config(CONFIG_JSON)
+
+def start_voice_backend():
+    """Start optional voice backend services selected by config.json."""
+    global _pipecat_gemini_proc
+    try:
+        cfg = _load_config_dict()
+        backend = selected_backend(cfg)
+    except FileNotFoundError:
+        return
+    except Exception as e:
+        print(f"  [backend] ⚠  Config error: {e}")
+        return
+
+    if backend != BACKEND_PIPECAT_GEMINI:
+        return
+
+    if _pipecat_gemini_proc and _pipecat_gemini_proc.poll() is None:
+        print("  [backend] Pipecat/Gemini proxy already running")
+        return
+    if not os.path.exists(PIPECAT_GEMINI_PROXY):
+        print("  [backend] ⚠  pipecat_gemini_proxy.py not found")
+        return
+
+    try:
+        _pipecat_gemini_proc = subprocess.Popen(
+            [sys.executable, PIPECAT_GEMINI_PROXY, "--config", CONFIG_JSON],
+            cwd=_DIR,
+        )
+        print("  [backend] ✅ Pipecat/Gemini proxy started")
+    except Exception as e:
+        print(f"  [backend] ⚠  Failed to start Pipecat/Gemini proxy: {e}")
 
 def open_jarvis_visual():
     """Open jarvis_visual.html at the top-center of the screen — the main visible window."""
@@ -523,7 +568,23 @@ def start_http_server():
             elif self.path in ("/visual", "/visual.html"):
                 self._serve_file(VISUAL_HTML)
             elif self.path == "/config.json":
-                self._serve_file(os.path.join(_DIR, "config.json"), "application/json")
+                try:
+                    cfg = build_web_config(_load_config_dict())
+                    data = json.dumps(cfg).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(data)
+                except FileNotFoundError:
+                    self.send_response(404); self.end_headers()
+                    self.wfile.write(b"config.json not found")
+                except Exception as e:
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": str(e)}).encode())
             elif self.path == "/state":
                 with _http_state_lock:
                     data = json.dumps(_http_state).encode()
@@ -801,11 +862,13 @@ def full_launch(source):
     print(f"\n  🚀  [{source}] JARVIS ACTIVATED\n")
 
     def sequence():
-        print("  [1/3] Browser automation client...")
+        print("  [1/4] Browser automation client...")
         start_browser_client()
-        print("  [2/3] JARVIS Visual window...")
+        print("  [2/4] Optional voice backend...")
+        start_voice_backend()
+        print("  [3/4] JARVIS Visual window...")
         open_jarvis_visual()
-        print("  [3/3] JARVIS Web backend (minimized)...")
+        print("  [4/4] JARVIS Web backend (minimized)...")
         open_jarvis_web_bg()
         print("  ✅  Done.\n")
     threading.Thread(target=sequence, daemon=True).start()
@@ -875,22 +938,20 @@ def _is_valid_token(token):
     return len(token) >= 20 and token.lower() not in _PLACEHOLDER_TOKENS
 
 def _load_token():
-    cfg_path = os.path.join(_DIR, "config.json")
     try:
-        with open(cfg_path, "r") as f:
+        with open(CONFIG_JSON, "r") as f:
             return json.load(f).get("TOKEN", "").strip()
     except Exception:
         return ""
 
 def _save_token(token):
-    cfg_path = os.path.join(_DIR, "config.json")
     try:
-        with open(cfg_path, "r") as f:
+        with open(CONFIG_JSON, "r") as f:
             cfg = json.load(f)
     except Exception:
         cfg = {}
     cfg["TOKEN"] = token
-    with open(cfg_path, "w") as f:
+    with open(CONFIG_JSON, "w") as f:
         json.dump(cfg, f, indent=2)
 
 def _prompt(text):
@@ -916,6 +977,15 @@ def _open_url(url):
 
 def check_api_key():
     """If token is missing or placeholder, run interactive setup in the terminal."""
+    try:
+        if not requires_toingg_token(_load_config_dict()):
+            return
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f"  [config] ⚠  Config error: {e}")
+        sys.exit(1)
+
     token = _load_token()
     if _is_valid_token(token):
         return  # token looks valid, continue normally

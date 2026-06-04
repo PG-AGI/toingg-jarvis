@@ -1,0 +1,4 @@
+fastapi>=0.111
+uvicorn[standard]>=0.30
+pipecat-ai[google]>=0.0.70
+google-genai>=1.0.0

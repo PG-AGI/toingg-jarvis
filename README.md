@@ -397,10 +397,42 @@ cp config.example.json config.json
 | `WS_URL` | Toingg WebSocket endpoint | Leave as-is (default endpoint) |
 | `TOKEN` | Your personal Toingg API token | [prepodapp.toingg.com/api-keys](https://prepodapp.toingg.com/api-keys) |
 | `CAMP_ID` | Campaign / agent ID | Use the default for the free demo, or create your own campaign |
+| `BACKEND` | Voice backend selector | `toingg` by default; set `pipecat_gemini` for the optional local backend |
+| `PIPECAT_GEMINI_WS_URL` | Local Pipecat/Gemini proxy WebSocket | Defaults to `ws://localhost:8767/ws` |
+| `GEMINI_API_KEY` | Gemini API key for the optional backend | Required only when `BACKEND` is `pipecat_gemini` |
+| `GEMINI_MODEL` | Gemini Live model name | Required only when `BACKEND` is `pipecat_gemini` |
 
 > 🆓 The default campaign ID `69d79c72b7ab98a9ef49bcad` is the **free JARVIS demo** shown in the preview video — no setup required beyond your API token.
 
 > 🔒 `config.json` is listed in `.gitignore` and will never be committed to version control.
+
+### Optional Pipecat + Gemini backend
+
+To keep the existing Toingg flow stable, Pipecat/Gemini is opt-in. Leave
+`BACKEND` unset or set to `toingg` for the current behavior. To use the local
+Pipecat/Gemini path:
+
+```bash
+pip install -r requirements-pipecat-gemini.txt
+cp config.example.json config.json
+```
+
+Then set:
+
+```json
+{
+  "BACKEND": "pipecat_gemini",
+  "PIPECAT_GEMINI_WS_URL": "ws://localhost:8767/ws",
+  "GEMINI_API_KEY": "your-gemini-api-key",
+  "GEMINI_MODEL": "gemini-live-preview"
+}
+```
+
+When this backend is selected, `jarvis_launcher.py` starts
+`pipecat_gemini_proxy.py` and serves `jarvis_web.html` a local WebSocket URL
+instead of the Toingg `WS_URL`. If optional dependencies or Gemini settings are
+missing, the proxy exits with an explicit setup message while the default
+Toingg configuration remains unchanged.
 
 ---
 
@@ -413,6 +445,8 @@ Key settings in the source files:
 | `WAKE_WORDS` | `jarvis_launcher.py` | `["hey jarvis", "jarvis", ...]` | Phrases that trigger full launch |
 | `LAUNCH_COOLDOWN` | `jarvis_launcher.py` | `4.0` s | Minimum seconds between consecutive launches |
 | `HTTP_PORT` | `jarvis_launcher.py` | `8766` | Local server port |
+| `BACKEND` | `config.json` | `toingg` | Selects `toingg` or the optional `pipecat_gemini` backend |
+| `PIPECAT_GEMINI_WS_URL` | `config.json` | `ws://localhost:8767/ws` | Browser-facing local proxy URL for Pipecat/Gemini |
 | `energy_threshold` | `jarvis_launcher.py` | `400` | Mic sensitivity (lower = more sensitive) |
 | `pause_threshold` | `jarvis_launcher.py` | `1.2` s | Silence duration before phrase ends |
 | `BROWSER_ACTION_DELAY_MS` | `jarvis_web.html` | `900` ms | Delay before first browser tab opens after audio starts |
