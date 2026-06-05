@@ -12,12 +12,19 @@ Requirements:
     pip install sounddevice numpy speechrecognition
 """
 
+import argparse
 import os, sys, time, threading, subprocess, tempfile, json, webbrowser
 import uuid
 import ctypes, ctypes.wintypes
 import platform as _plat
 from datetime import datetime, timedelta, timezone
 
+from browser_window_config import (
+    choose_screen_bounds,
+    chrome_window_args,
+    parse_browser_window_config,
+    resolve_window_geometry,
+)
 from native_file_manager import NativeFileActionError, handle_file_action_payload
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
@@ -43,6 +50,8 @@ _url_slot      = 0
 _url_slot_wins = {}
 _url_slot_modes = {}
 _slot_profiles = {}
+BROWSER_WINDOW_CONFIG = parse_browser_window_config()
+BROWSER_CLIENT_ARGS = []
 
 # ── APP REGISTRY ──────────────────────────────────────────────────────────────
 _IS_MAC = _plat.system() == "Darwin"
@@ -267,7 +276,126 @@ def _ensure_profile(slot):
         _slot_profiles[slot] = d
     return _slot_profiles[slot]
 
-def _slot_pos(slot):
+def _available_screen_bounds():
+    plat = _plat.system()
+    if plat == "Windows":
+        try:
+            monitors = []
+            user32 = ctypes.windll.user32
+
+            class _RECT(ctypes.Structure):
+                _fields_ = [
+                    ("left", ctypes.c_long), ("top", ctypes.c_long),
+                    ("right", ctypes.c_long), ("bottom", ctypes.c_long),
+                ]
+
+            class _MONITORINFO(ctypes.Structure):
+                _fields_ = [
+                    ("cbSize", ctypes.c_ulong),
+                    ("rcMonitor", _RECT),
+                    ("rcWork", _RECT),
+                    ("dwFlags", ctypes.c_ulong),
+                ]
+
+            def _callback(hmonitor, hdc, lprect, lparam):
+                info = _MONITORINFO()
+                info.cbSize = ctypes.sizeof(_MONITORINFO)
+                if user32.GetMonitorInfoW(hmonitor, ctypes.byref(info)):
+                    r = info.rcWork
+                    monitors.append((r.left, r.top, r.right - r.left, r.bottom - r.top))
+                return 1
+
+            monitor_enum_proc = ctypes.WINFUNCTYPE(
+                ctypes.c_int,
+                ctypes.c_ulong,
+                ctypes.c_ulong,
+                ctypes.POINTER(_RECT),
+                ctypes.c_double,
+            )
+            user32.EnumDisplayMonitors(0, 0, monitor_enum_proc(_callback), 0)
+            return monitors
+        except Exception:
+            return []
+
+    if plat == "Darwin":
+        try:
+            from AppKit import NSScreen
+
+            screens = list(NSScreen.screens())
+            if not screens:
+                return []
+            max_y = max(s.frame().origin.y + s.frame().size.height for s in screens)
+            bounds = []
+            for screen in screens:
+                frame = screen.frame()
+                sx, sy = frame.origin.x, frame.origin.y
+                sw, sh = frame.size.width, frame.size.height
+                bounds.append((int(sx), int(max_y - (sy + sh)), int(sw), int(sh)))
+            return bounds
+        except Exception:
+            return []
+
+    try:
+        import re
+        out = subprocess.check_output(["xrandr", "--listmonitors"], text=True, stderr=subprocess.DEVNULL)
+        bounds = []
+        for line in out.splitlines()[1:]:
+            match = re.search(r"(\d+)/\d+x(\d+)/\d+\+(-?\d+)\+(-?\d+)", line)
+            if match:
+                width, height, x, y = [int(part) for part in match.groups()]
+                bounds.append((x, y, width, height))
+        return bounds
+    except Exception:
+        return []
+
+def _screen_bounds_for_window_config():
+    active = get_active_screen_bounds()
+    sw, sh = get_screen_size()
+    fallback = (0, 0, sw, sh)
+    return choose_screen_bounds(
+        BROWSER_WINDOW_CONFIG.preferred_monitor,
+        _available_screen_bounds(),
+        active,
+        fallback,
+    )
+
+def _resolve_configured_geometry(default_size, default_position):
+    return resolve_window_geometry(
+        BROWSER_WINDOW_CONFIG,
+        default_size=default_size,
+        default_position=default_position,
+        screen_bounds=_screen_bounds_for_window_config(),
+    )
+
+def _parse_browser_window_cli(argv):
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--monitor", dest="preferred_monitor")
+    parser.add_argument("--window-size", dest="window_size")
+    parser.add_argument("--position")
+    args, _ = parser.parse_known_args(argv)
+    return {key: value for key, value in vars(args).items() if value}
+
+def _browser_client_args_from_config(config):
+    args = []
+    if config.preferred_monitor:
+        args.extend(["--monitor", config.preferred_monitor])
+    if config.window_size:
+        args.extend(["--window-size", f"{config.window_size[0]}x{config.window_size[1]}"])
+    if config.position:
+        if isinstance(config.position, tuple):
+            position = f"x={config.position[0]},y={config.position[1]}"
+        else:
+            position = config.position
+        args.extend(["--position", position])
+    return args
+
+def configure_browser_windows(argv=None):
+    global BROWSER_WINDOW_CONFIG, BROWSER_CLIENT_ARGS
+    BROWSER_WINDOW_CONFIG = parse_browser_window_config(cli_values=_parse_browser_window_cli(argv or []))
+    BROWSER_CLIENT_ARGS = _browser_client_args_from_config(BROWSER_WINDOW_CONFIG)
+    return BROWSER_WINDOW_CONFIG
+
+def _slot_pos(slot, win_w=URL_WIN_W, win_h=URL_WIN_H):
     """
     2×2 grid inset from screen edges:
       slot 0 = top-left    slot 1 = top-right
@@ -282,10 +410,10 @@ def _slot_pos(slot):
     p   = _PADDING
     col = slot % 2
     row = slot // 2
-    x   = sx + p + col * (URL_WIN_W + p)
-    y   = sy + p + row * (URL_WIN_H + p)
-    x   = min(x, sx + sw - URL_WIN_W - p)
-    y   = min(y, sy + sh - URL_WIN_H - p)
+    x   = sx + p + col * (win_w + p)
+    y   = sy + p + row * (win_h + p)
+    x   = min(x, sx + sw - win_w - p)
+    y   = min(y, sy + sh - win_h - p)
     return x, y
 
 def _is_desktop_preview_tab(tab):
@@ -327,8 +455,9 @@ def open_url_in_slot(url, slot, tab=None):
     if desktop_preview:
         win_w, win_h, x, y = _desktop_preview_geometry()
     else:
-        win_w, win_h = URL_WIN_W, URL_WIN_H
-        x, y = _slot_pos(slot)
+        default_w, default_h = BROWSER_WINDOW_CONFIG.window_size or (URL_WIN_W, URL_WIN_H)
+        x, y = _slot_pos(slot, default_w, default_h)
+        win_w, win_h, x, y = _resolve_configured_geometry((URL_WIN_W, URL_WIN_H), (x, y))
     profile = _ensure_profile(slot)
 
     old = _url_slot_wins.get(slot)
@@ -345,8 +474,7 @@ def open_url_in_slot(url, slot, tab=None):
             f"--user-data-dir={profile}",
             "--no-first-run",
             "--no-default-browser-check",
-            f"--window-size={win_w},{win_h}",
-            f"--window-position={x},{y}",
+            *chrome_window_args(win_w, win_h, x, y),
             url,
         ]
         # Mac-specific: suppress non-essential background services
@@ -555,7 +683,7 @@ def start_browser_client():
         print("  [browser] ⚠  browserClient.py not found"); return
 
     try:
-        _browser_client_proc = subprocess.Popen([sys.executable, BROWSER_CLIENT], cwd=_DIR)
+        _browser_client_proc = subprocess.Popen([sys.executable, BROWSER_CLIENT, *BROWSER_CLIENT_ARGS], cwd=_DIR)
         print("  [browser] ✅ browserClient.py started")
     except Exception as e:
         print(f"  [browser] ⚠  Failed to start browserClient.py: {e}")
@@ -568,8 +696,10 @@ def open_jarvis_visual():
 
     url     = f"http://localhost:{HTTP_PORT}/visual"
     chrome  = find_chrome()
-    win_w, win_h = 420, 520
-    vx, vy = top_center_near_active_window(win_w)
+    default_size = (420, 520)
+    default_w = BROWSER_WINDOW_CONFIG.window_size[0] if BROWSER_WINDOW_CONFIG.window_size else default_size[0]
+    vx, vy = top_center_near_active_window(default_w)
+    win_w, win_h, vx, vy = _resolve_configured_geometry(default_size, (vx, vy))
     profile = os.path.join(tempfile.gettempdir(), "jarvis_chrome_visual")
     os.makedirs(profile, exist_ok=True)
     if chrome:
@@ -580,8 +710,7 @@ def open_jarvis_visual():
             "--no-first-run",
             "--no-default-browser-check",
             "--autoplay-policy=no-user-gesture-required",
-            f"--window-size={win_w},{win_h}",
-            f"--window-position={vx},{vy}",
+            *chrome_window_args(win_w, win_h, vx, vy),
         ]
         if _IS_MAC:
             args.extend([
@@ -604,8 +733,10 @@ def open_jarvis_web_bg():
 
     url     = f"http://localhost:{HTTP_PORT}/"
     chrome  = find_chrome()
-    win_w, win_h = 700, 420
-    wx, wy = top_right_near_active_window(win_w)
+    default_size = (700, 420)
+    default_w = BROWSER_WINDOW_CONFIG.window_size[0] if BROWSER_WINDOW_CONFIG.window_size else default_size[0]
+    wx, wy = top_right_near_active_window(default_w)
+    win_w, win_h, wx, wy = _resolve_configured_geometry(default_size, (wx, wy))
 
     profile = os.path.join(tempfile.gettempdir(), "jarvis_chrome_web")
     os.makedirs(profile, exist_ok=True)
@@ -618,8 +749,7 @@ def open_jarvis_web_bg():
             "--no-first-run",
             "--no-default-browser-check",
             "--autoplay-policy=no-user-gesture-required",
-            f"--window-size={win_w},{win_h}",
-            f"--window-position={wx},{wy}",
+            *chrome_window_args(win_w, win_h, wx, wy),
         ]
         if _IS_MAC:
             args.extend([
@@ -1207,6 +1337,7 @@ def check_api_key():
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
+    configure_browser_windows(sys.argv[1:])
     print("""
   ╔══════════════════════════════════════════╗
   ║   W E E S T R E A M  //  J A R V I S    ║

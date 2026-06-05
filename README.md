@@ -198,6 +198,12 @@ python3 jarvis_launcher.py
 # Then say: "Hey Jarvis"
 ```
 
+Optional browser placement flags:
+
+```bash
+python3 jarvis_launcher.py --monitor active --window-size 1600x900 --position center
+```
+
 > 💡 No API key yet? The launcher will walk you through getting one interactively.
 
 ---
@@ -441,6 +447,9 @@ Key settings in the source files:
 | `HTTP_PORT` | `jarvis_launcher.py` | `8766` | Local server port |
 | `energy_threshold` | `jarvis_launcher.py` | `400` | Mic sensitivity (lower = more sensitive) |
 | `pause_threshold` | `jarvis_launcher.py` | `1.2` s | Silence duration before phrase ends |
+| `browser.preferred_monitor` | `config.json`, env, CLI | `active` | Preferred browser monitor (`active`, `primary`, `monitor-1`, `monitor-2`) |
+| `browser.window_size` | `config.json`, env, CLI | Default per window | Browser window size, e.g. `1600x900` |
+| `browser.position` | `config.json`, env, CLI | Default per window | Browser position (`center`, `top-left`, `top-right`, or `x=1920,y=0`) |
 | `BROWSER_ACTION_DELAY_MS` | `jarvis_web.html` | `900` ms | Delay before first browser tab opens after audio starts |
 | `MIN_BROWSER_ACTION_AUDIO_LEAD` | `jarvis_web.html` | `0.65` s | Minimum audio buffer lead before spawning Chrome |
 | `PLAYBACK_IDLE_GRACE_MS` | `jarvis_web.html` | `220` ms | Grace period after last audio chunk before marking idle |
