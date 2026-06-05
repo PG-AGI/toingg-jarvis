@@ -18,6 +18,8 @@ import ctypes, ctypes.wintypes
 import platform as _plat
 from datetime import datetime, timedelta, timezone
 
+from native_file_manager import NativeFileActionError, handle_file_action_payload
+
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 _DIR        = os.path.dirname(os.path.abspath(__file__))
 WEB_HTML    = os.path.join(_DIR, "jarvis_web.html")
@@ -801,6 +803,19 @@ def start_http_server():
                     self.wfile.write(json.dumps({"ok": True, "item": item}).encode())
                 except Exception as e:
                     print(f"  [schedule] schedule_action error: {e}")
+            elif self.path == "/file_action":
+                try:
+                    payload = json.loads(body) if body else {}
+                    result = handle_file_action_payload(payload)
+                    print(f"  [file] ok {result['action']} -> {result['path']}")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    response = {"ok": True, **result}
+                    self.wfile.write(json.dumps(response).encode())
+                except (NativeFileActionError, json.JSONDecodeError) as e:
+                    print(f"  [file] action error: {e}")
                     self.send_response(400)
                     self.send_header("Content-Type", "application/json")
                     self._cors()
@@ -818,6 +833,9 @@ def start_http_server():
                     self.wfile.write(json.dumps({"ok": cancelled}).encode())
                 except Exception as e:
                     self.send_response(400)
+                except Exception as e:
+                    print(f"  [file] unexpected error: {e}")
+                    self.send_response(500)
                     self.send_header("Content-Type", "application/json")
                     self._cors()
                     self.end_headers()
