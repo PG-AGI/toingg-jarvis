@@ -1,5 +1,8 @@
 {
   "WS_URL": "wss://prepodapi.toingg.com/api/v3/media/streaming",
-  "TOKEN":  "your-token-here",
-  "CAMP_ID": "your-campaign-id-here"
+  "TOKEN": "your-token-here",
+  "CAMP_ID": "your-campaign-id-here",
+  "BACKEND": "toingg",
+  "GEMINI_API_KEY": "",
+  "GEMINI_MODEL": "gemini-2.0-flash"
 }

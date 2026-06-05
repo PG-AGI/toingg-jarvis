@@ -978,6 +978,36 @@ def check_api_key():
         else:
             print("  ⚠   Invalid choice. Enter 1, 2, 3, Q, or paste your API key.\n", flush=True)
 
+# ── BACKEND SELECTION ──────────────────────────────────────────────────────────
+def _get_backend():
+    """Return the active backend from config.json (default: 'toingg')."""
+    cfg_path = os.path.join(_DIR, "config.json")
+    try:
+        with open(cfg_path, "r") as f:
+            cfg = json.load(f)
+        return cfg.get("BACKEND", "toingg").strip().lower()
+    except Exception:
+        return "toingg"
+
+def _start_pipecat_backend():
+    """Launch the Pipecat + Gemini backend as a subprocess."""
+    pipecat_script = os.path.join(_DIR, "pipecat_gemini_backend.py")
+    if not os.path.exists(pipecat_script):
+        print("  [backend] ⚠  pipecat_gemini_backend.py not found — falling back to Toingg")
+        return False
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, pipecat_script],
+            cwd=_DIR,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        print(f"  [backend] ✅ Pipecat+Gemini backend started (pid={proc.pid})")
+        return True
+    except Exception as e:
+        print(f"  [backend] ⚠  Failed to start Pipecat backend: {e}")
+        return False
+
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
     print("""
@@ -997,6 +1027,18 @@ def main():
 
     print(f"  📄  Web HTML : {WEB_HTML}")
     print(f"  🌐  Server   : http://localhost:{HTTP_PORT}/\n")
+
+    # ── Backend selection ──────────────────────────────────────────────────────
+    backend = _get_backend()
+    print(f"  🔧  Backend  : {backend}")
+
+    if backend == "pipecat_gemini":
+        if _start_pipecat_backend():
+            print("  🎤  Mode     : Pipecat + Gemini (voice + multimodal)")
+        else:
+            print("  🎤  Mode     : Toingg (fallback — Pipecat unavailable)")
+    else:
+        print("  🎤  Mode     : Toingg (default)")
 
     start_http_server()
 
