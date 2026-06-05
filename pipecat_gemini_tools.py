@@ -8,6 +8,7 @@ available.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import json
 from typing import Any, Callable
@@ -247,3 +248,95 @@ def handle_function_call_frame(
         http_post=http_post,
     )
     return build_function_result_frame(call, result)
+
+
+def build_tools_schema() -> Any:
+    """Return Pipecat ToolsSchema when Pipecat is installed.
+
+    The fallback keeps the module importable in the default Toingg path, where
+    Pipecat is optional and may not be installed.
+    """
+
+    try:
+        from pipecat.adapters.schemas.function_schema import FunctionSchema
+        from pipecat.adapters.schemas.tools_schema import ToolsSchema
+    except Exception:
+        return TOOL_DEFINITIONS
+
+    functions = [
+        FunctionSchema(
+            name=tool["name"],
+            description=tool["description"],
+            properties=tool.get("parameters", {}).get("properties", {}),
+            required=tool.get("parameters", {}).get("required", []),
+        )
+        for tool in TOOL_DEFINITIONS
+    ]
+    return ToolsSchema(standard_tools=functions)
+
+
+async def handle_function_call_params(
+    params: Any,
+    launcher_url: str = DEFAULT_LAUNCHER_URL,
+    http_post: Callable[[str, dict[str, Any]], dict[str, Any]] = post_json,
+    function_name: str | None = None,
+) -> dict[str, Any]:
+    """Pipecat FunctionCallParams handler for the launcher-backed tools."""
+
+    name = function_name or _first_attr(params, "function_name", "name")
+    if not name:
+        raise ValueError("FunctionCallParams is missing function_name")
+    arguments = _coerce_arguments(_first_attr(params, "arguments", "args"))
+
+    result = await asyncio.to_thread(
+        call_launcher_tool,
+        str(name),
+        arguments,
+        launcher_url,
+        http_post,
+    )
+
+    callback = _first_attr(params, "result_callback")
+    if callback:
+        maybe_awaitable = callback(result)
+        if hasattr(maybe_awaitable, "__await__"):
+            await maybe_awaitable
+
+    return result
+
+
+def register_launcher_tools(
+    llm_service: Any,
+    launcher_url: str = DEFAULT_LAUNCHER_URL,
+    http_post: Callable[[str, dict[str, Any]], dict[str, Any]] = post_json,
+    cancel_on_interruption: bool = True,
+) -> list[str]:
+    """Register all JARVIS launcher tools on a Pipecat LLM service."""
+
+    if not hasattr(llm_service, "register_function"):
+        raise TypeError("llm_service must provide register_function(name, handler, ...)")
+
+    registered = []
+    for tool in TOOL_DEFINITIONS:
+        name = str(tool["name"])
+
+        async def handler(params: Any, tool_name: str = name) -> dict[str, Any]:
+            if not _first_attr(params, "function_name", "name"):
+                try:
+                    setattr(params, "function_name", tool_name)
+                except Exception:
+                    pass
+            return await handle_function_call_params(
+                params,
+                launcher_url=launcher_url,
+                http_post=http_post,
+                function_name=tool_name,
+            )
+
+        llm_service.register_function(
+            name,
+            handler,
+            cancel_on_interruption=cancel_on_interruption,
+        )
+        registered.append(name)
+    return registered

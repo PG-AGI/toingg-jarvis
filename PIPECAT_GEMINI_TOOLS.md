@@ -4,7 +4,7 @@ Issue #11 requires Gemini function calls to reach the local launcher instead of
 stopping at model-side tool declarations. `pipecat_gemini_tools.py` provides the
 missing bridge:
 
-1. Register `TOOL_DEFINITIONS` with the Gemini/Pipecat LLM service.
+1. Register the launcher tools with the Gemini/Pipecat LLM service.
 2. When the Pipecat proxy receives a function-call frame, call
    `handle_function_call_frame(frame)`.
 3. Push the returned frame back into the Pipecat pipeline so Gemini receives the
@@ -12,6 +12,9 @@ missing bridge:
 
 The bridge keeps Pipecat optional. If Pipecat is installed, the returned object
 is a `FunctionCallResultFrame`; otherwise tests use a compatible local dataclass.
+For Pipecat's standard function-calling path, `build_tools_schema()` returns a
+`ToolsSchema` when Pipecat is installed, and `register_launcher_tools(llm)`
+registers async `FunctionCallParams` handlers with `llm.register_function(...)`.
 
 ## Launcher endpoint mapping
 
@@ -26,9 +29,17 @@ is a `FunctionCallResultFrame`; otherwise tests use a compatible local dataclass
 ## Example proxy hook
 
 ```python
-from pipecat_gemini_tools import TOOL_DEFINITIONS, handle_function_call_frame
+from pipecat_gemini_tools import (
+    build_tools_schema,
+    handle_function_call_frame,
+    register_launcher_tools,
+)
 
-# Register TOOL_DEFINITIONS with the Gemini LLM service setup.
+# Pass this as the LLMContext tools value when creating the Gemini pipeline.
+tools = build_tools_schema()
+
+# Register the actual tool handlers on the Gemini/Pipecat LLM service.
+register_launcher_tools(llm)
 
 async def on_frame(frame, transport):
     if frame.__class__.__name__ in ("FunctionCallFrame", "FunctionCallInProgressFrame"):
