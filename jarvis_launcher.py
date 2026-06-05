@@ -13,8 +13,10 @@ Requirements:
 """
 
 import os, sys, time, threading, subprocess, tempfile, json, webbrowser
+import uuid
 import ctypes, ctypes.wintypes
 import platform as _plat
+from datetime import datetime, timedelta, timezone
 
 from native_file_manager import NativeFileActionError, handle_file_action_payload
 
@@ -374,6 +376,172 @@ def close_all_url_windows(auto=False):
         _url_slot_modes.pop(slot, None)
 
 # ── JARVIS WINDOWS ────────────────────────────────────────────────────────────
+_scheduled_actions = {}
+_scheduled_actions_lock = threading.Lock()
+_scheduler_started = False
+
+def _utc_now():
+    return datetime.now(timezone.utc)
+
+def _parse_run_at(value, now=None):
+    now = now or _utc_now()
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(float(value), timezone.utc)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("run_at must be an ISO timestamp or epoch seconds")
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=now.tzinfo or timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+def _next_daily_run(trigger, now=None):
+    now = now or _utc_now()
+    time_text = str(trigger.get("time", "")).strip()
+    try:
+        hour_text, minute_text = time_text.split(":", 1)
+        hour = int(hour_text)
+        minute = int(minute_text)
+        if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+            raise ValueError
+    except ValueError:
+        raise ValueError("daily trigger time must be HH:MM")
+    candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if candidate <= now:
+        candidate += timedelta(days=1)
+    return candidate
+
+def _next_schedule_time(trigger, now=None):
+    now = now or _utc_now()
+    if not isinstance(trigger, dict):
+        raise ValueError("trigger must be a JSON object")
+    trigger_type = str(trigger.get("type", "once")).lower()
+    if "delay_seconds" in trigger:
+        delay = max(0, float(trigger["delay_seconds"]))
+        return now + timedelta(seconds=delay)
+    if "run_at" in trigger:
+        return _parse_run_at(trigger["run_at"], now)
+    if trigger_type in ("daily", "recurring"):
+        return _next_daily_run(trigger, now)
+    raise ValueError("trigger needs delay_seconds, run_at, or type=daily with time=HH:MM")
+
+def _normalize_scheduled_actions(payload):
+    actions = payload.get("actions")
+    if actions is None:
+        action = payload.get("action")
+        if not action:
+            raise ValueError("actions or action is required")
+        actions = [{"type": action, **payload.get("params", {})}]
+    if not isinstance(actions, list) or not actions:
+        raise ValueError("actions must be a non-empty list")
+    normalized = []
+    for item in actions:
+        if not isinstance(item, dict):
+            raise ValueError("each scheduled action must be an object")
+        action_type = str(item.get("type") or item.get("action") or "").strip().lower()
+        if not action_type:
+            raise ValueError("each action needs type")
+        normalized.append({**item, "type": action_type})
+    return normalized
+
+def create_scheduled_action(payload, now=None):
+    if not isinstance(payload, dict):
+        raise ValueError("payload must be a JSON object")
+    trigger = payload.get("trigger", {"delay_seconds": payload.get("delay_seconds", 0)})
+    scheduled_for = _next_schedule_time(trigger, now)
+    item = {
+        "id": payload.get("id") or uuid.uuid4().hex[:12],
+        "name": str(payload.get("name") or "scheduled action"),
+        "trigger": trigger,
+        "actions": _normalize_scheduled_actions(payload),
+        "status": "scheduled",
+        "scheduled_for": scheduled_for.isoformat(),
+        "created_at": (now or _utc_now()).isoformat(),
+        "last_error": "",
+    }
+    with _scheduled_actions_lock:
+        _scheduled_actions[item["id"]] = item
+    print(f"  [schedule] queued {item['id']} for {item['scheduled_for']}")
+    return item
+
+def list_scheduled_actions():
+    with _scheduled_actions_lock:
+        return sorted(_scheduled_actions.values(), key=lambda item: item["scheduled_for"])
+
+def cancel_scheduled_action(action_id):
+    with _scheduled_actions_lock:
+        item = _scheduled_actions.get(action_id)
+        if not item:
+            return False
+        item["status"] = "cancelled"
+        return True
+
+def _execute_scheduled_actions(item):
+    global _url_slot
+    try:
+        for action in item["actions"]:
+            action_type = action["type"]
+            if action_type in ("wait", "sleep"):
+                time.sleep(max(0, float(action.get("seconds", 0))))
+            elif action_type in ("open_url", "open_window"):
+                url = str(action.get("url", "")).strip()
+                if not url:
+                    raise ValueError("open_url action needs url")
+                slot = _url_slot % 4
+                _url_slot = (_url_slot + 1) % 4
+                open_url_in_slot(url, slot, action)
+            elif action_type == "open_tabs":
+                tabs = action.get("tabs") or action.get("urls") or []
+                if not isinstance(tabs, list):
+                    raise ValueError("open_tabs action needs tabs or urls list")
+                close_all_url_windows()
+                for index, tab in enumerate(tabs[:4]):
+                    url = tab.get("url", tab) if isinstance(tab, dict) else str(tab)
+                    open_url_in_slot(url, index % 4, tab)
+                    time.sleep(0.4)
+            elif action_type == "close_tabs":
+                close_all_url_windows(auto=bool(action.get("auto", False)))
+            else:
+                raise ValueError(f"unsupported scheduled action: {action_type}")
+        item["status"] = "completed"
+        print(f"  [schedule] completed {item['id']}")
+    except Exception as exc:
+        item["status"] = "failed"
+        item["last_error"] = str(exc)
+        print(f"  [schedule] failed {item['id']}: {exc}")
+    trigger = item.get("trigger", {})
+    if isinstance(trigger, dict) and str(trigger.get("type", "")).lower() in ("daily", "recurring"):
+        try:
+            item["scheduled_for"] = _next_schedule_time(trigger).isoformat()
+            item["status"] = "scheduled"
+        except Exception as exc:
+            item["status"] = "failed"
+            item["last_error"] = str(exc)
+
+def _scheduler_loop():
+    while True:
+        now = _utc_now()
+        due = []
+        with _scheduled_actions_lock:
+            for item in _scheduled_actions.values():
+                if item["status"] != "scheduled":
+                    continue
+                if _parse_run_at(item["scheduled_for"], now) <= now:
+                    item["status"] = "running"
+                    due.append(item)
+        for item in due:
+            threading.Thread(target=_execute_scheduled_actions, args=(item,), daemon=True).start()
+        time.sleep(0.25)
+
+def start_scheduler():
+    global _scheduler_started
+    if _scheduler_started:
+        return
+    _scheduler_started = True
+    threading.Thread(target=_scheduler_loop, daemon=True, name="scheduler").start()
+
 _visual_proc = None
 _web_proc    = None
 _browser_client_proc = None
@@ -492,6 +660,7 @@ def start_http_server():
     _http_started = True
 
     _kill_port(HTTP_PORT)
+    start_scheduler()
 
     from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -529,6 +698,13 @@ def start_http_server():
             elif self.path == "/state":
                 with _http_state_lock:
                     data = json.dumps(_http_state).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self._cors()
+                self.end_headers()
+                self.wfile.write(data)
+            elif self.path == "/scheduled_actions":
+                data = json.dumps({"ok": True, "items": list_scheduled_actions()}).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self._cors()
@@ -616,6 +792,17 @@ def start_http_server():
                 self.end_headers()
                 self.wfile.write(b'{"ok":true}')
 
+            elif self.path == "/schedule_action":
+                try:
+                    payload = json.loads(body) if body else {}
+                    item = create_scheduled_action(payload)
+                    self.send_response(201)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": True, "item": item}).encode())
+                except Exception as e:
+                    print(f"  [schedule] schedule_action error: {e}")
             elif self.path == "/file_action":
                 try:
                     payload = json.loads(body) if body else {}
@@ -634,6 +821,18 @@ def start_http_server():
                     self._cors()
                     self.end_headers()
                     self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+
+            elif self.path == "/cancel_scheduled_action":
+                try:
+                    payload = json.loads(body) if body else {}
+                    cancelled = cancel_scheduled_action(str(payload.get("id", "")))
+                    self.send_response(200 if cancelled else 404)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": cancelled}).encode())
+                except Exception as e:
+                    self.send_response(400)
                 except Exception as e:
                     print(f"  [file] unexpected error: {e}")
                     self.send_response(500)
