@@ -760,7 +760,7 @@ def open_jarvis_web_bg():
                 # it silently blocks WebSocket connections on Chrome 120+
             ])
         _web_proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        print(f"  [web] ✅ opened ({win_w}×{win_h} @ {wx},{wy}) — click window once to activate audio")
+        print(f"  [web] opened ({win_w}x{win_h} @ {wx},{wy}) - click window once to activate audio")
     else:
         webbrowser.open(url)
 
