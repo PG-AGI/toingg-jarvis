@@ -895,7 +895,7 @@ def find_running_pid(exe_name):
     try:
         out = subprocess.check_output(
             ["tasklist", "/FI", f"IMAGENAME eq {exe_name}", "/FO", "CSV", "/NH"],
-            shell=True, stderr=subprocess.DEVNULL
+            shell=False, stderr=subprocess.DEVNULL
         ).decode(errors="ignore")
         for line in out.strip().splitlines():
             parts = line.strip('"').split('","')
@@ -1073,7 +1073,10 @@ def voice_listener():
     while True:
         if stop_capture.is_set():
             print("  [voice] ⏸  Mic paused. Press Enter to resume...")
-            input()
+            try:
+                input()
+            except (EOFError, KeyboardInterrupt):
+                pass
             stop_capture.clear()
             print("  [voice] ▶  Resumed.\n")
         try:

@@ -1,0 +1,170 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag (e.g. v2.1.0)"
+        required: true
+        default: "v2.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install pyaudio numpy websocket-client rich SpeechRecognition playwright playwright-stealth
+
+      - name: Build with PyInstaller
+        run: pyinstaller jarvis.spec --clean --noconfirm
+
+      - name: Package as portable ZIP
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}"
+          if ($version -eq "") { $version = "${{ inputs.version }}" }
+          $version = $version -replace '^v', ''
+          Compress-Archive -Path dist\JARVIS\* -DestinationPath "JARVIS-$version-win64-portable.zip"
+
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS-win64-portable
+          path: JARVIS-*-win64-portable.zip
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system dependencies
+        run: brew install portaudio
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install pyaudio numpy websocket-client rich SpeechRecognition playwright playwright-stealth
+
+      - name: Build with PyInstaller
+        run: pyinstaller jarvis.spec --clean --noconfirm
+
+      - name: Create DMG
+        run: |
+          VERSION="${{ github.ref_name }}"
+          if [ -z "$VERSION" ]; then VERSION="${{ inputs.version }}"; fi
+          VERSION=$(echo "$VERSION" | sed 's/^v//')
+          mkdir -p dmg_staging
+          cp -R dist/JARVIS/* dmg_staging/
+          cp JARVIS.command dmg_staging/
+          cp setup_mac.sh dmg_staging/
+          chmod +x dmg_staging/JARVIS dmg_staging/JARVIS.command dmg_staging/setup_mac.sh
+          hdiutil create -volname "JARVIS" -srcfolder dmg_staging -ov -format UDZO "JARVIS-${VERSION}-macos.dmg"
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS-macos-dmg
+          path: JARVIS-*-macos.dmg
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y portaudio19-dev python3-pyaudio python3-dev binutils
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install pyaudio numpy websocket-client rich SpeechRecognition playwright playwright-stealth
+
+      - name: Build with PyInstaller
+        run: pyinstaller jarvis.spec --clean --noconfirm
+
+      - name: Package as portable tarball
+        run: |
+          VERSION="${{ github.ref_name }}"
+          if [ -z "$VERSION" ]; then VERSION="${{ inputs.version }}"; fi
+          VERSION=$(echo "$VERSION" | sed 's/^v//')
+          cd dist/JARVIS
+          tar czf "../../JARVIS-${VERSION}-linux-x64.tar.gz" *
+
+      - name: Upload portable tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS-linux-portable
+          path: JARVIS-*-linux-x64.tar.gz
+
+  create-release:
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts
+        run: |
+          find artifacts -type f \( -name "*.zip" -o -name "*.dmg" -o -name "*.tar.gz" \) \
+            -exec cp {} ./ \;
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name || inputs.version }}
+          name: "JARVIS ${{ github.ref_name || inputs.version }}"
+          body: |
+            ## J.A.R.V.I.S ${{ github.ref_name || inputs.version }}
+
+            Cross-platform voice AI terminal powered by Toingg.
+
+            ### Download
+            - **Windows**: `JARVIS-*.zip` (extract and run `JARVIS.exe`)
+            - **macOS**: `JARVIS-*.dmg` (mount and drag to Applications)
+            - **Linux**: `JARVIS-*.tar.gz` (extract and run `./JARVIS`)
+
+            ### Requirements
+            - Microphone and speakers/headphones
+            - Google Chrome, Chromium, or Edge
+            - Toingg API key (free from prepodapp.toingg.com)
+
+            See [README.md](https://github.com/PG-AGI/toingg-jarvis#readme) for full setup instructions.
+          files: |
+            *.zip
+            *.dmg
+            *.tar.gz
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
