@@ -1,0 +1,17 @@
+JARVIS packaging bounty #13
+
+Local staging:
+python scripts/package_release.py --platform linux
+
+CI matrix:
+Linux, macOS, Windows
+
+Artifacts:
+jarvis.spec
+requirements-build.txt
+PACKAGING.md
+
+Validation:
+py_compile plus three platform manifests
+
+/claim #13

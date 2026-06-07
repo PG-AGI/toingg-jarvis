@@ -204,6 +204,9 @@ python3 jarvis_launcher.py
 
 ## 🛠️ Installation
 
+For native release packaging and CI artifact generation, see
+[PACKAGING.md](PACKAGING.md).
+
 ### 1. Clone the repository
 
 ```bash
