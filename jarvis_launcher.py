@@ -1028,6 +1028,9 @@ def full_launch(source):
     print(f"\n  🚀  [{source}] JARVIS ACTIVATED\n")
 
     def sequence():
+        if _is_pipecat_backend():
+            print("  [pipecat] Launching Gemini backend...")
+            start_pipecat_backend()
         print("  [1/3] Browser automation client...")
         start_browser_client()
         print("  [2/3] JARVIS Visual window...")
@@ -1207,6 +1210,45 @@ def check_api_key():
 
         else:
             print("  ⚠   Invalid choice. Enter 1, 2, 3, Q, or paste your API key.\n", flush=True)
+
+# ── PIPECAT GEMINI BACKEND ───────────────────────────────────────────────────
+PIPECAT_GEMINI_SCRIPT = os.path.join(_DIR, "pipecat_gemini.py")
+_pipecat_proc = None
+
+def _is_pipecat_backend():
+    """Check if config.json requests the pipecat_gemini backend."""
+    try:
+        cfg_path = os.path.join(_DIR, "config.json")
+        with open(cfg_path, "r") as f:
+            cfg = json.load(f)
+        backend = str(cfg.get("BACKEND", "")).strip().lower()
+        if backend == "pipecat_gemini":
+            if "GEMINI_API_KEY" in os.environ:
+                return True
+            api_key = cfg.get("GEMINI_API_KEY", "").strip()
+            if api_key and api_key not in ("your-gemini-key-here", ""):
+                return True
+    except Exception:
+        pass
+    return False
+
+def start_pipecat_backend():
+    """Start pipecat_gemini.py as alternative backend."""
+    global _pipecat_proc
+    if _pipecat_proc and _pipecat_proc.poll() is None:
+        print("  [pipecat] already running"); return
+    if not os.path.exists(PIPECAT_GEMINI_SCRIPT):
+        print("  [pipecat] \u26a0  pipecat_gemini.py not found"); return
+    try:
+        _pipecat_proc = subprocess.Popen(
+            [sys.executable, PIPECAT_GEMINI_SCRIPT],
+            cwd=_DIR,
+            stdout=None,
+            stderr=None,
+        )
+        print("  [pipecat] \u2705 Gemini backend started")
+    except Exception as e:
+        print(f"  [pipecat] \u26a0  Failed: {e}")
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
