@@ -70,6 +70,18 @@ class ScheduledActionsTest(unittest.TestCase):
         self.assertTrue(jarvis_launcher.cancel_scheduled_action(item["id"]))
         self.assertEqual(jarvis_launcher.list_scheduled_actions()[0]["status"], "cancelled")
 
+    def test_playwright_action_uses_immediate_schedule(self):
+        now = datetime(2026, 6, 3, 12, 0, tzinfo=timezone.utc)
+
+        item = jarvis_launcher.create_playwright_action(
+            {"action": "navigate", "params": {"url": "https://example.com"}},
+            now=now,
+        )
+
+        self.assertEqual(item["name"], "playwright: navigate")
+        self.assertEqual(item["scheduled_for"], "2026-06-03T12:00:00+00:00")
+        self.assertEqual(item["actions"], [{"type": "open_url", "url": "https://example.com"}])
+
 
 if __name__ == "__main__":
     unittest.main()
