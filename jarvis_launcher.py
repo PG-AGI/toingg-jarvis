@@ -832,10 +832,8 @@ def start_http_server():
                     self.end_headers()
                     self.wfile.write(json.dumps({"ok": cancelled}).encode())
                 except Exception as e:
+                    print(f"  [schedule] cancel error: {e}")
                     self.send_response(400)
-                except Exception as e:
-                    print(f"  [file] unexpected error: {e}")
-                    self.send_response(500)
                     self.send_header("Content-Type", "application/json")
                     self._cors()
                     self.end_headers()
@@ -1069,7 +1067,9 @@ def voice_listener():
     recognizer.non_speaking_duration    = 0.8
     recognizer.phrase_threshold         = 0.3
     print("  [voice] 🎙  Listening for: hey jarvis / jarvis...")
-
+    # Initialise once outside the loop — re-opening the audio device every cycle
+    # causes churn and can crash on some systems.
+    mic = sr.Microphone(sample_rate=16000)
     while True:
         if stop_capture.is_set():
             print("  [voice] ⏸  Mic paused. Press Enter to resume...")
@@ -1077,7 +1077,6 @@ def voice_listener():
             stop_capture.clear()
             print("  [voice] ▶  Resumed.\n")
         try:
-            mic = sr.Microphone(sample_rate=16000)
             with mic as source:
                 recognizer.adjust_for_ambient_noise(source, duration=0.5)
             with mic as source2:

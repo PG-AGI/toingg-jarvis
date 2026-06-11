@@ -1,11 +1,11 @@
 """
-claudeBot.py — Browser automation client for the Toingg personal AI assistant.
+browserClient.py — Browser automation client for the Toingg personal AI assistant.
 
 Connects to the backend WebSocket, receives Playwright-compatible commands from the LLM,
 executes them in a real browser, and returns results.
 
 Usage:
-    python claudeBot.py --url ws://localhost:8002/api/v3/media/browser/default
+    python browserClient.py --url ws://localhost:8002/api/v3/media/browser/default
 
 Requirements:
     pip install websocket-client playwright playwright-stealth
@@ -1182,7 +1182,7 @@ class BrowserClient:
     def _on_message(self, ws, raw: str):
         try:
             msg = json.loads(raw)
-            print("Received: ", msg)
+            log.debug("Received: %s", msg)
         except json.JSONDecodeError:
             return
 
