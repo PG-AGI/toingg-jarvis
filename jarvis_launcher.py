@@ -1205,6 +1205,14 @@ def check_api_key():
         else:
             print("  ⚠   Invalid choice. Enter 1, 2, 3, Q, or paste your API key.\n", flush=True)
 
+# ── BACKEND SELECTION ─────────────────────────────────────────────────────────
+def _load_backend():
+    cfg_path = os.path.join(_DIR, "config.json")
+    try:
+        with open(cfg_path, "r") as f:
+            return json.load(f).get("BACKEND", "toingg").strip().lower()
+    except Exception:
+        return "toingg"
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
     print("""
@@ -1227,9 +1235,17 @@ def main():
 
     start_http_server()
 
-    threads = [
-        threading.Thread(target=voice_listener, daemon=True, name="voice"),
-    ]
+    backend = _load_backend()
+    if backend == "pipecat_gemini":
+        print("  🤖  Backend: Pipecat + Gemini Live\n")
+        from pipecat_backend import start_pipecat_gemini
+        start_pipecat_gemini()
+        threads = []  # voice_listener not needed — Pipecat handles mic
+    else:
+        print("  🔌  Backend: Toingg (default)\n")
+        threads = [
+            threading.Thread(target=voice_listener, daemon=True, name="voice"),
+        ]
     for t in threads:
         t.start()
 
