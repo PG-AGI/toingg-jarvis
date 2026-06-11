@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_DIR="$(cd "$(dirname "$0")/../Resources/app" && pwd)"
+open -a Terminal "$APP_DIR/JARVIS.command"

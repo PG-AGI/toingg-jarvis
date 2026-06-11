@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_DIR="/opt/jarvis"
+VENV_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/jarvis/venv"
+
+cd "$APP_DIR"
+
+if [ ! -x "$VENV_DIR/bin/python" ]; then
+  python3 -m venv "$VENV_DIR"
+fi
+
+"$VENV_DIR/bin/python" -m pip install --upgrade pip
+"$VENV_DIR/bin/python" -m pip install -r requirements.txt
+"$VENV_DIR/bin/python" -m playwright install chromium
+
+exec "$VENV_DIR/bin/python" jarvis_launcher.py

@@ -1,0 +1,72 @@
+name: Package native installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Inno Setup
+        shell: powershell
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: powershell
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $iscc packaging\windows\JARVIS.iss
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS-Setup-windows
+          path: packaging/windows/Output/JARVIS-Setup.exe
+
+  linux:
+    name: Debian package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build .deb
+        run: bash packaging/linux/build-deb.sh
+
+      - name: Upload Debian package
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS-debian-package
+          path: dist/linux/*.deb
+
+  macos:
+    name: macOS app and DMG
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build app bundle and DMG
+        run: bash packaging/macos/build-macos.sh
+
+      - name: Upload macOS app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS-macos-app
+          path: dist/macos/JARVIS.app.zip
+
+      - name: Upload macOS DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS-macos-dmg
+          path: dist/macos/JARVIS.dmg

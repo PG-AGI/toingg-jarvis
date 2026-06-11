@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=J.A.R.V.I.S
+Comment=Launch the J.A.R.V.I.S AI voice terminal
+Exec=jarvis
+Terminal=true
+Type=Application
+Categories=Utility;AudioVideo;
