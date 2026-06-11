@@ -892,10 +892,15 @@ def resolve_path(path):
     return path.replace("{user}", user)
 
 def find_running_pid(exe_name):
+    # tasklist is Windows-only — bail out immediately on other platforms
+    if _plat.system() != "Windows":
+        return None
     try:
+        # shell=False is correct here — passing a list with shell=True causes
+        # Python to ignore all args after the first, silently breaking the filters
         out = subprocess.check_output(
             ["tasklist", "/FI", f"IMAGENAME eq {exe_name}", "/FO", "CSV", "/NH"],
-            shell=True, stderr=subprocess.DEVNULL
+            shell=False, stderr=subprocess.DEVNULL
         ).decode(errors="ignore")
         for line in out.strip().splitlines():
             parts = line.strip('"').split('","')
@@ -906,6 +911,9 @@ def find_running_pid(exe_name):
     return None
 
 def focus_window_by_exe(exe_name, rect):
+    # Windows-only — ctypes.windll does not exist on macOS/Linux
+    if _plat.system() != "Windows":
+        return False
     user32 = ctypes.windll.user32
     EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
     found = []
@@ -935,6 +943,9 @@ def focus_window_by_exe(exe_name, rect):
     return False
 
 def resize_window_by_pid(pid, rect, retries=20, interval=0.5):
+    # Windows-only — ctypes.windll does not exist on macOS/Linux
+    if _plat.system() != "Windows":
+        return
     user32 = ctypes.windll.user32
     EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
     def find_hwnd():
@@ -945,10 +956,6 @@ def resize_window_by_pid(pid, rect, retries=20, interval=0.5):
             win_pid = ctypes.wintypes.DWORD(0)
             user32.GetWindowThreadProcessId(hwnd, ctypes.byref(win_pid))
             if win_pid.value == pid:
-                found.append(hwnd); return False
-            buf = ctypes.create_unicode_buffer(256)
-            user32.GetWindowTextW(hwnd, buf, 256)
-            if 'spotify' in buf.value.lower():
                 found.append(hwnd); return False
             return True
         user32.EnumWindows(EnumWindowsProc(cb), 0)
@@ -971,7 +978,9 @@ def open_app(name):
             "vs code": "Visual Studio Code", "vscode": "Visual Studio Code",
             "code": "Visual Studio Code", "visual studio code": "Visual Studio Code",
             "spotify": "Spotify", "chrome": "Google Chrome", "firefox": "Firefox",
+            "terminal": "Terminal", "calculator": "Calculator",
         }
+        # terminal and calculator were missing — added macOS equivalents
         app = mac_names.get(name)
         if app:
             try:
@@ -1070,6 +1079,7 @@ def voice_listener():
     recognizer.phrase_threshold         = 0.3
     print("  [voice] 🎙  Listening for: hey jarvis / jarvis...")
 
+    mic = sr.Microphone(sample_rate=16000)
     while True:
         if stop_capture.is_set():
             print("  [voice] ⏸  Mic paused. Press Enter to resume...")
@@ -1077,7 +1087,6 @@ def voice_listener():
             stop_capture.clear()
             print("  [voice] ▶  Resumed.\n")
         try:
-            mic = sr.Microphone(sample_rate=16000)
             with mic as source:
                 recognizer.adjust_for_ambient_noise(source, duration=0.5)
             with mic as source2:
