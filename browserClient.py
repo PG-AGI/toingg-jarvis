@@ -24,6 +24,7 @@ import base64
 
 import websocket
 from playwright.sync_api import sync_playwright, Page, Playwright
+from upload_store import UploadStore, attach_uploaded_files
 
 # playwright-stealth >= 2.x uses `Stealth`; older 1.x used `stealth_sync`.
 try:
@@ -103,6 +104,7 @@ class BrowserClient:
         self.page: Page | None = None
         self.playwright: Playwright | None = None
         self._stop = threading.Event()
+        self.upload_store = UploadStore()
 
     def _select_active_page(self) -> Page | None:
         """Prefer the useful app tab over the initial about:blank page."""
@@ -1044,6 +1046,24 @@ class BrowserClient:
                 self._human_delay()
                 page.select_option(selector, value)
                 return {"success": True, "result": f"Selected '{value}' in '{selector}'"}
+
+            elif action in ("input_file", "set_input_files"):
+                selector = params["selector"]
+                tokens = params.get("tokens")
+                if tokens is None:
+                    token = params.get("token")
+                    tokens = [token] if token else []
+                count = attach_uploaded_files(
+                    page,
+                    self.upload_store,
+                    selector,
+                    tokens,
+                    params.get("timeout", 10000),
+                )
+                return {
+                    "success": True,
+                    "result": f"Attached {count} uploaded file(s) to '{selector}'",
+                }
 
             elif action == "scroll":
                 x = params.get("x", 0)

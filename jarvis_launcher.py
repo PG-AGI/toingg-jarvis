@@ -19,6 +19,12 @@ import platform as _plat
 from datetime import datetime, timedelta, timezone
 
 from native_file_manager import NativeFileActionError, handle_file_action_payload
+from upload_store import (
+    MAX_UPLOAD_REQUEST_BYTES,
+    UploadError,
+    UploadStore,
+    parse_multipart_images,
+)
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 _DIR        = os.path.dirname(os.path.abspath(__file__))
@@ -28,6 +34,7 @@ BROWSER_CLIENT = os.path.join(_DIR, "browserClient.py")
 WAKE_WORDS  = ["hey jarvis", "jarvis", "hey jervis", "hey davis"]
 LAUNCH_COOLDOWN = 4.0
 HTTP_PORT   = 8766
+UPLOAD_STORE = UploadStore()
 
 # ── shared state (jarvis_web.html POSTs here; jarvis_visual.html polls here) ─
 _http_state      = {"state": "initializing", "text": "", "status": "INITIALIZING..."}
@@ -715,6 +722,31 @@ def start_http_server():
 
         def do_POST(self):
             global _url_slot
+            if self.path == "/api/uploads":
+                try:
+                    length = int(self.headers.get("Content-Length", 0))
+                    if length <= 0:
+                        raise UploadError("Upload request body is empty")
+                    if length > MAX_UPLOAD_REQUEST_BYTES:
+                        raise UploadError(
+                            f"Upload request exceeds the {MAX_UPLOAD_REQUEST_BYTES // (1024 * 1024)} MB limit"
+                        )
+                    body = self.rfile.read(length)
+                    uploads = parse_multipart_images(self.headers.get("Content-Type", ""), body)
+                    stored = [UPLOAD_STORE.save(upload) for upload in uploads]
+                    self.send_response(201)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": True, "uploads": stored}).encode())
+                except (UploadError, ValueError) as e:
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+                return
+
             length = int(self.headers.get("Content-Length", 0))
             body   = self.rfile.read(length) if length else b""
 
