@@ -542,6 +542,82 @@ def start_scheduler():
     _scheduler_started = True
     threading.Thread(target=_scheduler_loop, daemon=True, name="scheduler").start()
 
+_playwright_tool = {"pw": None, "browser": None, "page": None}
+
+def _get_playwright_tool_page(headless=True):
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        raise RuntimeError("playwright is not installed; run: pip install playwright") from exc
+
+    page = _playwright_tool.get("page")
+    if page and not page.is_closed():
+        return page
+
+    pw = sync_playwright().start()
+    browser = pw.chromium.launch(headless=headless)
+    page = browser.new_page()
+    _playwright_tool.update({"pw": pw, "browser": browser, "page": page})
+    return page
+
+def execute_playwright_tool_action(payload):
+    if not isinstance(payload, dict):
+        raise ValueError("payload must be a JSON object")
+    action = str(payload.get("action", "")).strip().lower()
+    if not action:
+        raise ValueError("playwright action is required")
+
+    page = _get_playwright_tool_page(headless=bool(payload.get("headless", True)))
+    timeout = int(payload.get("timeout", 30000))
+
+    if action in ("navigate", "goto", "open_url"):
+        url = str(payload.get("url") or payload.get("value") or "").strip()
+        if not url:
+            raise ValueError("navigate action requires url or value")
+        page.goto(url, timeout=timeout)
+        return {"action": action, "url": page.url}
+
+    if action == "click":
+        selector = str(payload.get("selector", "")).strip()
+        if not selector:
+            raise ValueError("click action requires selector")
+        page.click(selector, timeout=timeout)
+        return {"action": action, "selector": selector}
+
+    if action in ("type", "fill"):
+        selector = str(payload.get("selector", "")).strip()
+        value = str(payload.get("value", ""))
+        if not selector:
+            raise ValueError(f"{action} action requires selector")
+        page.fill(selector, value, timeout=timeout)
+        return {"action": action, "selector": selector}
+
+    if action == "screenshot":
+        path = str(payload.get("path") or os.path.join(tempfile.gettempdir(), "jarvis-playwright.png"))
+        page.screenshot(path=path, full_page=bool(payload.get("full_page", True)))
+        return {"action": action, "path": path}
+
+    if action == "extract":
+        selector = str(payload.get("selector") or "body")
+        text = page.locator(selector).inner_text(timeout=timeout)
+        return {"action": action, "selector": selector, "text": text}
+
+    if action == "scroll":
+        delta = int(payload.get("delta_y", payload.get("value", 600)))
+        page.mouse.wheel(0, delta)
+        return {"action": action, "delta_y": delta}
+
+    if action == "wait":
+        page.wait_for_timeout(int(payload.get("timeout", 1000)))
+        return {"action": action}
+
+    raise ValueError(f"unsupported playwright action: {action}")
+
+def execute_playwright_tool_actions(actions):
+    if not isinstance(actions, list) or not actions:
+        raise ValueError("actions must be a non-empty list")
+    return [execute_playwright_tool_action(action) for action in actions]
+
 _visual_proc = None
 _web_proc    = None
 _browser_client_proc = None
@@ -816,6 +892,40 @@ def start_http_server():
                     self.wfile.write(json.dumps(response).encode())
                 except (NativeFileActionError, json.JSONDecodeError) as e:
                     print(f"  [file] action error: {e}")
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+
+            elif self.path == "/playwright_action":
+                try:
+                    payload = json.loads(body) if body else {}
+                    result = execute_playwright_tool_action(payload)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": True, "result": result}).encode())
+                except Exception as e:
+                    print(f"  [playwright] action error: {e}")
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+
+            elif self.path == "/playwright_actions":
+                try:
+                    payload = json.loads(body) if body else {}
+                    result = execute_playwright_tool_actions(payload.get("actions"))
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": True, "result": result}).encode())
+                except Exception as e:
+                    print(f"  [playwright] actions error: {e}")
                     self.send_response(400)
                     self.send_header("Content-Type", "application/json")
                     self._cors()
