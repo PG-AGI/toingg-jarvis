@@ -1,0 +1,7 @@
+numpy
+playwright
+playwright-stealth
+requests
+sounddevice
+speechrecognition
+websocket-client
