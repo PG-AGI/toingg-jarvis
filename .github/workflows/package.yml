@@ -1,0 +1,40 @@
+name: Package Toingg Jarvis
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  package:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build dependencies
+        run: python -m pip install -r requirements-build.txt
+
+      - name: Install Playwright browser
+        run: python -m playwright install chromium
+
+      - name: Build PyInstaller bundle
+        run: pyinstaller --clean --noconfirm jarvis_launcher.spec
+
+      - name: Stage release artifact
+        run: python scripts/package_release.py --frozen-dist dist/toingg-jarvis --output artifacts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: toingg-jarvis-${{ runner.os }}
+          path: artifacts/*.zip

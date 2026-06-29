@@ -1,0 +1,5 @@
+numpy>=1.24
+playwright>=1.44
+playwright-stealth>=1.0
+SpeechRecognition>=3.10
+websocket-client>=1.7
