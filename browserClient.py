@@ -5,7 +5,7 @@ Connects to the backend WebSocket, receives Playwright-compatible commands from 
 executes them in a real browser, and returns results.
 
 Usage:
-    python claudeBot.py --url ws://localhost:8002/api/v3/media/browser/default
+    python browserClient.py --url ws://localhost:8002/api/v3/media/browser/default
 
 Requirements:
     pip install websocket-client playwright playwright-stealth
@@ -181,7 +181,6 @@ class BrowserClient:
         tag = parts[0]
         if not tag:
             return selector
-
         # Re-merge decimal suffixes: ["p-2", "5"] → "p-2.5"
         classes: list[str] = []
         for part in parts[1:]:
