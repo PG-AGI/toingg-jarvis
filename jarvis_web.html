@@ -1611,9 +1611,15 @@ async function loadConfig() {
   const res = await fetch("config.json");
   if (!res.ok) throw new Error(`config.json not found (${res.status})`);
   const cfg = await res.json();
-  WS_URL  = cfg.WS_URL  || "";
   TOKEN   = cfg.TOKEN   || "";
   CAMP_ID = cfg.CAMP_ID || "";
+  const backend = (cfg.BACKEND || "toingg").toLowerCase();
+  if (backend === "pipecat_gemini") {
+    WS_URL = "ws://localhost:8767";
+    logChat("sys", "\u25c8 PIPECAT/GEMINI BACKEND");
+  } else {
+    WS_URL = cfg.WS_URL || "";
+  }
 }
 
 async function boot() {
