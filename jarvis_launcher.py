@@ -621,6 +621,8 @@ def execute_playwright_tool_actions(actions):
 _visual_proc = None
 _web_proc    = None
 _browser_client_proc = None
+PIPECAT_GEMINI_SCRIPT = os.path.join(_DIR, "pipecat_gemini.py")
+_pipecat_proc = None
 
 def start_browser_client():
     """Start browserClient.py in the background for browser automation."""
@@ -635,6 +637,35 @@ def start_browser_client():
         print("  [browser] ✅ browserClient.py started")
     except Exception as e:
         print(f"  [browser] ⚠  Failed to start browserClient.py: {e}")
+
+def _load_config():
+    cfg_path = os.path.join(_DIR, "config.json")
+    try:
+        with open(cfg_path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _is_pipecat_backend():
+    cfg = _load_config()
+    backend = str(cfg.get("BACKEND", "")).strip().lower()
+    if backend != "pipecat_gemini":
+        return False
+    api_key = os.environ.get("GEMINI_API_KEY") or str(cfg.get("GEMINI_API_KEY", "")).strip()
+    return bool(api_key and api_key != "your-gemini-api-key-here")
+
+def start_pipecat_backend():
+    """Start the optional local Pipecat/Gemini bridge."""
+    global _pipecat_proc
+    if _pipecat_proc and _pipecat_proc.poll() is None:
+        print("  [pipecat] already running"); return
+    if not os.path.exists(PIPECAT_GEMINI_SCRIPT):
+        print("  [pipecat] ⚠  pipecat_gemini.py not found"); return
+    try:
+        _pipecat_proc = subprocess.Popen([sys.executable, PIPECAT_GEMINI_SCRIPT], cwd=_DIR)
+        print("  [pipecat] ✅ Gemini backend started")
+    except Exception as e:
+        print(f"  [pipecat] ⚠  Failed to start Gemini backend: {e}")
 
 def open_jarvis_visual():
     """Open jarvis_visual.html at the top-center of the screen — the main visible window."""
@@ -867,6 +898,37 @@ def start_http_server():
                 self._cors()
                 self.end_headers()
                 self.wfile.write(b'{"ok":true}')
+
+            elif self.path == "/playwright_action":
+                try:
+                    payload = json.loads(body) if body else {}
+                    if not isinstance(payload, dict):
+                        raise ValueError("payload must be a JSON object")
+                    action_type = str(payload.get("action") or payload.get("type") or "").strip().lower()
+                    params = payload.get("params") or {}
+                    if not action_type:
+                        raise ValueError("action is required")
+                    if not isinstance(params, dict):
+                        raise ValueError("params must be a JSON object")
+                    item = create_scheduled_action(
+                        {
+                            "name": f"playwright: {action_type}",
+                            "trigger": {"delay_seconds": 0},
+                            "actions": [{"type": action_type, **params}],
+                        }
+                    )
+                    self.send_response(202)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": True, "item": item}).encode())
+                except Exception as e:
+                    print(f"  [playwright] action error: {e}")
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
 
             elif self.path == "/schedule_action":
                 try:
@@ -1142,6 +1204,9 @@ def full_launch(source):
     print(f"\n  🚀  [{source}] JARVIS ACTIVATED\n")
 
     def sequence():
+        if _is_pipecat_backend():
+            print("  [pipecat] Launching Gemini backend...")
+            start_pipecat_backend()
         print("  [1/3] Browser automation client...")
         start_browser_client()
         print("  [2/3] JARVIS Visual window...")
