@@ -1005,7 +1005,7 @@ def find_running_pid(exe_name):
     try:
         out = subprocess.check_output(
             ["tasklist", "/FI", f"IMAGENAME eq {exe_name}", "/FO", "CSV", "/NH"],
-            shell=True, stderr=subprocess.DEVNULL
+            shell=False, stderr=subprocess.DEVNULL
         ).decode(errors="ignore")
         for line in out.strip().splitlines():
             parts = line.strip('"').split('","')
@@ -1016,6 +1016,8 @@ def find_running_pid(exe_name):
     return None
 
 def focus_window_by_exe(exe_name, rect):
+    if _plat.system() != "Windows":
+        return False
     user32 = ctypes.windll.user32
     EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
     found = []
@@ -1045,6 +1047,8 @@ def focus_window_by_exe(exe_name, rect):
     return False
 
 def resize_window_by_pid(pid, rect, retries=20, interval=0.5):
+    if _plat.system() != "Windows":
+        return
     user32 = ctypes.windll.user32
     EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
     def find_hwnd():
@@ -1055,10 +1059,6 @@ def resize_window_by_pid(pid, rect, retries=20, interval=0.5):
             win_pid = ctypes.wintypes.DWORD(0)
             user32.GetWindowThreadProcessId(hwnd, ctypes.byref(win_pid))
             if win_pid.value == pid:
-                found.append(hwnd); return False
-            buf = ctypes.create_unicode_buffer(256)
-            user32.GetWindowTextW(hwnd, buf, 256)
-            if 'spotify' in buf.value.lower():
                 found.append(hwnd); return False
             return True
         user32.EnumWindows(EnumWindowsProc(cb), 0)
@@ -1081,15 +1081,19 @@ def open_app(name):
             "vs code": "Visual Studio Code", "vscode": "Visual Studio Code",
             "code": "Visual Studio Code", "visual studio code": "Visual Studio Code",
             "spotify": "Spotify", "chrome": "Google Chrome", "firefox": "Firefox",
+            "terminal": "Terminal", "calculator": "Calculator",
+            "notepad": "TextEdit", "explorer": "Finder",
         }
         app = mac_names.get(name)
-        if app:
+        candidates = [app] if app else [name.title(), name]
+        for candidate in candidates:
             try:
-                subprocess.Popen(["open", "-a", app])
+                subprocess.Popen(["open", "-a", candidate])
                 print(f"  [app] ✅ Launched {name}")
                 return True
-            except Exception as e:
-                print(f"  [app] ⚠  Mac open failed: {e}")
+            except Exception:
+                pass
+        print(f"  [app] ✗ Could not open: {name}")
         return False
 
     paths    = APPS.get(name, [])
@@ -1179,15 +1183,18 @@ def voice_listener():
     recognizer.non_speaking_duration    = 0.8
     recognizer.phrase_threshold         = 0.3
     print("  [voice] 🎙  Listening for: hey jarvis / jarvis...")
+    mic = sr.Microphone(sample_rate=16000)
 
     while True:
         if stop_capture.is_set():
             print("  [voice] ⏸  Mic paused. Press Enter to resume...")
-            input()
+            try:
+                input()
+            except (EOFError, KeyboardInterrupt):
+                pass
             stop_capture.clear()
             print("  [voice] ▶  Resumed.\n")
         try:
-            mic = sr.Microphone(sample_rate=16000)
             with mic as source:
                 recognizer.adjust_for_ambient_noise(source, duration=0.5)
             with mic as source2:
