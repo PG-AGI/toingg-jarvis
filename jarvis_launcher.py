@@ -592,6 +592,31 @@ def execute_playwright_tool_action(payload):
         page.fill(selector, value, timeout=timeout)
         return {"action": action, "selector": selector}
 
+    if action == "input_file":
+        selector = str(payload.get("selector", "")).strip()
+        token = str(payload.get("token", "")).strip()
+        if not selector or not token:
+            raise ValueError("input_file action requires selector and token")
+            
+        import tempfile
+        import os
+        import re
+        
+        # Security: validate token is alphanumeric + extension (uuid pattern)
+        if not re.match(r'^[\w-]+\.\w+$', token):
+            raise ValueError("Invalid token format")
+            
+        path = os.path.join(tempfile.gettempdir(), f"jarvis_upload_{token}")
+        if not os.path.exists(path):
+            raise ValueError(f"Upload not found or expired for token: {token}")
+            
+        page.set_input_files(selector, path, timeout=timeout)
+        try:
+            os.remove(path)
+        except OSError:
+            pass # Ignore deletion errors
+        return {"action": action, "selector": selector, "status": "uploaded"}
+
     if action == "screenshot":
         path = str(payload.get("path") or os.path.join(tempfile.gettempdir(), "jarvis-playwright.png"))
         page.screenshot(path=path, full_page=bool(payload.get("full_page", True)))
@@ -738,6 +763,31 @@ def start_http_server():
     _kill_port(HTTP_PORT)
     start_scheduler()
 
+    def _cleanup_temp_uploads():
+        import tempfile
+        import time
+        import os
+        while True:
+            try:
+                temp_dir = tempfile.gettempdir()
+                now = time.time()
+                for filename in os.listdir(temp_dir):
+                    if filename.startswith("jarvis_upload_"):
+                        filepath = os.path.join(temp_dir, filename)
+                        if os.path.isfile(filepath):
+                            if os.stat(filepath).st_mtime < now - 3600:
+                                try:
+                                    os.remove(filepath)
+                                    print(f"  [upload] Cleaned up orphaned file {filename}")
+                                except Exception:
+                                    pass
+            except Exception:
+                pass
+            time.sleep(3600)
+            
+    import threading
+    threading.Thread(target=_cleanup_temp_uploads, daemon=True).start()
+
     from http.server import HTTPServer, BaseHTTPRequestHandler
 
     class H(BaseHTTPRequestHandler):
@@ -792,6 +842,15 @@ def start_http_server():
         def do_POST(self):
             global _url_slot
             length = int(self.headers.get("Content-Length", 0))
+            
+            if self.path == "/api/upload" and length > 25 * 1024 * 1024:
+                self.send_response(413)
+                self.send_header("Content-Type", "application/json")
+                self._cors()
+                self.end_headers()
+                self.wfile.write(b'{"ok":false,"error":"Payload too large"}')
+                return
+                
             body   = self.rfile.read(length) if length else b""
 
             if self.path == "/state":
@@ -867,6 +926,68 @@ def start_http_server():
                 self._cors()
                 self.end_headers()
                 self.wfile.write(b'{"ok":true}')
+
+            elif self.path == "/api/upload":
+                try:
+                    import email
+                    import os
+                    content_type = self.headers.get("Content-Type", "")
+                    fake_email_bytes = f"Content-Type: {content_type}\r\n\r\n".encode("utf-8") + body
+                    msg = email.message_from_bytes(fake_email_bytes)
+                    
+                    saved_token = None
+                    allowed_exts = {".png", ".jpg", ".jpeg", ".webp", ".pdf", ".txt", ".csv", ".json"}
+                    
+                    for part in msg.walk():
+                        if part.get_filename():
+                            original_filename = part.get_filename()
+                            ext = os.path.splitext(original_filename)[1].lower()
+                            if ext not in allowed_exts:
+                                self.send_response(415)
+                                self.send_header("Content-Type", "application/json")
+                                self._cors()
+                                self.end_headers()
+                                self.wfile.write(b'{"ok":false,"error":"Unsupported media type"}')
+                                return
+                            
+                            payload = part.get_payload(decode=True)
+                            if len(payload) > 10 * 1024 * 1024:
+                                self.send_response(413)
+                                self.send_header("Content-Type", "application/json")
+                                self._cors()
+                                self.end_headers()
+                                self.wfile.write(b'{"ok":false,"error":"Image too large"}')
+                                return
+                            
+                            token_uuid = str(uuid.uuid4())
+                            token = f"{token_uuid}{ext}"
+                            save_path = os.path.join(tempfile.gettempdir(), f"jarvis_upload_{token}")
+                            
+                            with open(save_path, "wb") as f:
+                                f.write(payload)
+                            
+                            saved_token = token
+                            break
+                            
+                    if saved_token:
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/json")
+                        self._cors()
+                        self.end_headers()
+                        self.wfile.write(json.dumps({"ok": True, "token": saved_token}).encode("utf-8"))
+                    else:
+                        self.send_response(400)
+                        self.send_header("Content-Type", "application/json")
+                        self._cors()
+                        self.end_headers()
+                        self.wfile.write(b'{"ok":false,"error":"No file found"}')
+                except Exception as e:
+                    print(f"  [upload] Error: {e}")
+                    self.send_response(500)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode("utf-8"))
 
             elif self.path == "/schedule_action":
                 try:

@@ -717,6 +717,30 @@ class BrowserClient:
                     )
                     return {"success": True, "result": result}
 
+            elif action == "input_file":
+                selector = str(params.get("selector", "")).strip()
+                token = str(params.get("token", "")).strip()
+                if not selector or not token:
+                    return {"success": False, "error": "input_file action requires selector and token"}
+                    
+                import tempfile
+                import re
+                
+                # Security: validate token is alphanumeric + extension (uuid pattern)
+                if not re.match(r'^[\w-]+\.\w+$', token):
+                    return {"success": False, "error": "Invalid token format"}
+                    
+                path = os.path.join(tempfile.gettempdir(), f"jarvis_upload_{token}")
+                if not os.path.exists(path):
+                    return {"success": False, "error": f"Upload not found or expired for token: {token}"}
+                    
+                page.set_input_files(selector, path, timeout=params.get("timeout", 30000))
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass # Ignore deletion errors
+                return {"success": True, "result": f"Uploaded file to '{selector}'"}
+
             elif action == "fill":
                 selector = params["selector"]
                 value = params["value"]

@@ -64,6 +64,7 @@ TOOL_DEFINITIONS = [
                 "value": {"type": "string"},
                 "url": {"type": "string"},
                 "timeout": {"type": "integer"},
+                "token": {"type": "string"},
             },
             "required": ["action"],
         },
