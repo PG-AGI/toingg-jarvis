@@ -1,0 +1,153 @@
+name: Native release
+
+on:
+  pull_request:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (for example v1.2.3)"
+        required: true
+        default: "v0.1.0"
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.0.0-ci' }}
+  PLAYWRIGHT_BROWSERS_PATH: "0"
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: Windows
+            os: windows-latest
+          - platform: Linux
+            os: ubuntu-latest
+          - platform: macOS
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-packaging.txt
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev libportaudio2 portaudio19-dev
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: brew install portaudio
+
+      - name: Install Windows installer tooling
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install nsis --yes --no-progress
+
+      - name: Install Python and browser dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-packaging.txt
+          if [[ "${RUNNER_OS}" == "Linux" ]]; then
+            python -m playwright install --with-deps --no-shell chromium
+          else
+            python -m playwright install --no-shell chromium
+          fi
+
+      - name: Run tests
+        run: python -m unittest discover -v
+
+      - name: Build standalone application
+        run: pyinstaller jarvis.spec --clean --noconfirm
+
+      - name: Smoke-test Windows application
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          JARVIS_CONFIG_DIR: ${{ runner.temp }}\jarvis-smoke-config
+        run: .\dist\JARVIS\JARVIS.exe --packaging-smoke-test
+
+      - name: Smoke-test Linux application
+        if: runner.os == 'Linux'
+        env:
+          JARVIS_CONFIG_DIR: ${{ runner.temp }}/jarvis-smoke-config
+        run: ./dist/JARVIS/JARVIS --packaging-smoke-test
+
+      - name: Smoke-test macOS application
+        if: runner.os == 'macOS'
+        env:
+          JARVIS_CONFIG_DIR: ${{ runner.temp }}/jarvis-smoke-config
+        run: ./dist/JARVIS.app/Contents/MacOS/JARVIS --packaging-smoke-test
+
+      - name: Create Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = $env:RELEASE_VERSION -replace '^v', ''
+          $source = (Resolve-Path 'dist\JARVIS').Path
+          $output = New-Item -ItemType Directory -Force 'artifacts'
+          & makensis.exe "/DAPP_VERSION=$version" "/DSOURCE_DIR=$source" "/DOUTPUT_DIR=$($output.FullName)" 'packaging\windows\JARVIS.nsi'
+          Compress-Archive -Path 'dist\JARVIS\*' -DestinationPath "artifacts\JARVIS-$version-windows-x64-portable.zip"
+
+      - name: Create Linux packages
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          version=${RELEASE_VERSION#v}
+          mkdir -p artifacts
+          chmod +x packaging/linux/build_deb.sh
+          packaging/linux/build_deb.sh dist/JARVIS "$version" artifacts
+          tar -C dist/JARVIS -czf "artifacts/JARVIS-${version}-linux-portable.tar.gz" .
+
+      - name: Create macOS disk image
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          version=${RELEASE_VERSION#v}
+          mkdir -p artifacts
+          chmod +x packaging/macos/build_dmg.sh
+          packaging/macos/build_dmg.sh dist/JARVIS.app "$version" artifacts
+
+      - name: Upload native artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS-${{ matrix.platform }}
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish native installers
+        uses: softprops/action-gh-release@v2
+        with:
+          name: JARVIS ${{ env.RELEASE_VERSION }}
+          generate_release_notes: true
+          files: artifacts/*
+          fail_on_unmatched_files: true

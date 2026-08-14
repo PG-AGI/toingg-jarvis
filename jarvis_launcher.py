@@ -21,13 +21,70 @@ from datetime import datetime, timedelta, timezone
 from native_file_manager import NativeFileActionError, handle_file_action_payload
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
-_DIR        = os.path.dirname(os.path.abspath(__file__))
-WEB_HTML    = os.path.join(_DIR, "jarvis_web.html")
-VISUAL_HTML = os.path.join(_DIR, "jarvis_visual.html")
-BROWSER_CLIENT = os.path.join(_DIR, "browserClient.py")
+_SOURCE_DIR = os.path.dirname(os.path.abspath(__file__))
+_BUNDLE_DIR = getattr(sys, "_MEIPASS", _SOURCE_DIR)
+
+# Playwright stores browsers beside its driver when installed with
+# PLAYWRIGHT_BROWSERS_PATH=0. Point frozen builds at that bundled location.
+if getattr(sys, "frozen", False):
+    os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
+
+
+def _resource_path(name):
+    """Return a read-only resource path in source and PyInstaller builds."""
+    return os.path.join(_BUNDLE_DIR, name)
+
+
+def _platform_config_dir():
+    """Return a writable per-user directory without touching the install tree."""
+    override = os.environ.get("JARVIS_CONFIG_DIR")
+    if override:
+        return os.path.abspath(os.path.expanduser(override))
+
+    system = _plat.system()
+    if system == "Windows":
+        root = os.environ.get("APPDATA") or os.path.expanduser("~")
+        return os.path.join(root, "JARVIS")
+    if system == "Darwin":
+        return os.path.expanduser("~/Library/Application Support/JARVIS")
+
+    root = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.join(root, "jarvis")
+
+
+def _runtime_config_dir():
+    """Keep source checkouts compatible while packaged apps use user storage."""
+    if not os.environ.get("JARVIS_CONFIG_DIR") and not getattr(sys, "frozen", False):
+        legacy_config = os.path.join(_SOURCE_DIR, "config.json")
+        if os.path.isfile(legacy_config):
+            return _SOURCE_DIR
+    return _platform_config_dir()
+
+
+_CONFIG_DIR = _runtime_config_dir()
+CONFIG_PATH = os.path.join(_CONFIG_DIR, "config.json")
+BROWSER_PROFILE_DIR = os.path.join(_CONFIG_DIR, "browser-profile")
+WEB_HTML = _resource_path("jarvis_web.html")
+VISUAL_HTML = _resource_path("jarvis_visual.html")
+BROWSER_CLIENT = _resource_path("browserClient.py")
 WAKE_WORDS  = ["hey jarvis", "jarvis", "hey jervis", "hey davis"]
 LAUNCH_COOLDOWN = 4.0
 HTTP_PORT   = 8766
+
+
+def _ensure_config_file():
+    """Create the user's config from the bundled example when necessary."""
+    os.makedirs(_CONFIG_DIR, exist_ok=True)
+    if not os.path.exists(CONFIG_PATH):
+        example_path = _resource_path("config.example.json")
+        try:
+            with open(example_path, "r", encoding="utf-8") as source:
+                initial_config = json.load(source)
+        except (OSError, ValueError):
+            initial_config = {}
+        with open(CONFIG_PATH, "w", encoding="utf-8") as target:
+            json.dump(initial_config, target, indent=2)
+    return CONFIG_PATH
 
 # ── shared state (jarvis_web.html POSTs here; jarvis_visual.html polls here) ─
 _http_state      = {"state": "initializing", "text": "", "status": "INITIALIZING..."}
@@ -627,11 +684,26 @@ def start_browser_client():
     global _browser_client_proc
     if _browser_client_proc and _browser_client_proc.poll() is None:
         print("  [browser] already running"); return
-    if not os.path.exists(BROWSER_CLIENT):
+    if not getattr(sys, "frozen", False) and not os.path.exists(BROWSER_CLIENT):
         print("  [browser] ⚠  browserClient.py not found"); return
 
     try:
-        _browser_client_proc = subprocess.Popen([sys.executable, BROWSER_CLIENT], cwd=_DIR)
+        os.makedirs(_CONFIG_DIR, exist_ok=True)
+        if getattr(sys, "frozen", False):
+            args = [
+                sys.executable,
+                "--browser-client",
+                "--user-data-dir",
+                BROWSER_PROFILE_DIR,
+            ]
+        else:
+            args = [
+                sys.executable,
+                BROWSER_CLIENT,
+                "--user-data-dir",
+                BROWSER_PROFILE_DIR,
+            ]
+        _browser_client_proc = subprocess.Popen(args, cwd=_CONFIG_DIR)
         print("  [browser] ✅ browserClient.py started")
     except Exception as e:
         print(f"  [browser] ⚠  Failed to start browserClient.py: {e}")
@@ -770,7 +842,8 @@ def start_http_server():
             elif self.path in ("/visual", "/visual.html"):
                 self._serve_file(VISUAL_HTML)
             elif self.path == "/config.json":
-                self._serve_file(os.path.join(_DIR, "config.json"), "application/json")
+                _ensure_config_file()
+                self._serve_file(CONFIG_PATH, "application/json")
             elif self.path == "/state":
                 with _http_state_lock:
                     data = json.dumps(_http_state).encode()
@@ -957,7 +1030,7 @@ def start_http_server():
                     token = payload.get("token", "").strip()
                     if not token:
                         raise ValueError("token is empty")
-                    cfg_path = os.path.join(_DIR, "config.json")
+                    cfg_path = _ensure_config_file()
                     try:
                         with open(cfg_path, "r") as f:
                             cfg = json.load(f)
@@ -1219,7 +1292,7 @@ def _is_valid_token(token):
     return len(token) >= 20 and token.lower() not in _PLACEHOLDER_TOKENS
 
 def _load_token():
-    cfg_path = os.path.join(_DIR, "config.json")
+    cfg_path = _ensure_config_file()
     try:
         with open(cfg_path, "r") as f:
             return json.load(f).get("TOKEN", "").strip()
@@ -1227,7 +1300,7 @@ def _load_token():
         return ""
 
 def _save_token(token):
-    cfg_path = os.path.join(_DIR, "config.json")
+    cfg_path = _ensure_config_file()
     try:
         with open(cfg_path, "r") as f:
             cfg = json.load(f)
@@ -1323,6 +1396,33 @@ def check_api_key():
             print("  ⚠   Invalid choice. Enter 1, 2, 3, Q, or paste your API key.\n", flush=True)
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
+def packaging_smoke_test():
+    """Verify that a packaged build has its resources and writable config."""
+    required_resources = [WEB_HTML, VISUAL_HTML, _resource_path("config.example.json")]
+    missing = [path for path in required_resources if not os.path.isfile(path)]
+    if missing:
+        print("Missing packaged resources: " + ", ".join(missing), file=sys.stderr)
+        return 1
+
+    try:
+        config_path = _ensure_config_file()
+        with open(config_path, "r", encoding="utf-8") as config_file:
+            json.load(config_file)
+        import browserClient  # noqa: F401 - proves the bundled automation module imports
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as playwright:
+            browser_path = playwright.chromium.executable_path
+        if not os.path.isfile(browser_path):
+            raise FileNotFoundError(f"bundled Chromium not found: {browser_path}")
+    except Exception as exc:
+        print(f"Packaging smoke test failed: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"Packaging smoke test passed; config={config_path}; chromium={browser_path}")
+    return 0
+
+
 def main():
     print("""
   ╔══════════════════════════════════════════╗
@@ -1357,4 +1457,12 @@ def main():
         print("\n  Stopped.")
 
 if __name__ == "__main__":
-    main()
+    if "--browser-client" in sys.argv:
+        sys.argv.remove("--browser-client")
+        import browserClient
+
+        browserClient.main()
+    elif "--packaging-smoke-test" in sys.argv:
+        sys.exit(packaging_smoke_test())
+    else:
+        main()

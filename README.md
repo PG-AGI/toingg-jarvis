@@ -204,6 +204,13 @@ python3 jarvis_launcher.py
 
 ## 🛠️ Installation
 
+### Native installers
+
+Tagged releases build standalone installers for Windows (`.exe`), Debian/Ubuntu
+(`.deb`), and macOS (`.dmg`). Python is bundled, so end users do not need to
+install it separately. See [PACKAGING.md](PACKAGING.md) for the artifact layout,
+local build commands, and release verification.
+
 ### 1. Clone the repository
 
 ```bash
