@@ -1,0 +1,7 @@
+numpy==2.3.2
+playwright==1.54.0
+playwright-stealth==2.0.0
+PyAudio==0.2.14
+pyinstaller==6.15.0
+SpeechRecognition==3.14.3
+websocket-client==1.8.0
