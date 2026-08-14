@@ -1,6 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all
@@ -76,16 +75,3 @@ collection = COLLECT(
     upx=False,
     name="JARVIS",
 )
-
-if sys.platform == "darwin":
-    app = BUNDLE(
-        collection,
-        name="JARVIS.app",
-        bundle_identifier="com.pgagi.jarvis",
-        info_plist={
-            "CFBundleDisplayName": "JARVIS",
-            "NSMicrophoneUsageDescription": (
-                "JARVIS uses the microphone to listen for the wake word and voice commands."
-            ),
-        },
-    )

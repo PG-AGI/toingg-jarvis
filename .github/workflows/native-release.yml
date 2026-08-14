@@ -73,7 +73,15 @@ jobs:
         run: python -m unittest discover -v
 
       - name: Build standalone application
+        if: runner.os != 'macOS'
         run: pyinstaller jarvis.spec --clean --noconfirm
+
+      - name: Build standalone macOS application
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          chmod +x packaging/macos/build_standalone.sh
+          packaging/macos/build_standalone.sh
 
       - name: Smoke-test Windows application
         if: runner.os == 'Windows'
@@ -92,7 +100,7 @@ jobs:
         if: runner.os == 'macOS'
         env:
           JARVIS_CONFIG_DIR: ${{ runner.temp }}/jarvis-smoke-config
-        run: ./dist/JARVIS.app/Contents/MacOS/JARVIS --packaging-smoke-test
+        run: ./dist/JARVIS/JARVIS --packaging-smoke-test
 
       - name: Create Windows installer
         if: runner.os == 'Windows'
@@ -101,7 +109,14 @@ jobs:
           $version = $env:RELEASE_VERSION -replace '^v', ''
           $source = (Resolve-Path 'dist\JARVIS').Path
           $output = New-Item -ItemType Directory -Force 'artifacts'
-          & makensis.exe "/DAPP_VERSION=$version" "/DSOURCE_DIR=$source" "/DOUTPUT_DIR=$($output.FullName)" 'packaging\windows\JARVIS.nsi'
+          $makensis = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
+          if (-not (Test-Path $makensis)) {
+            $makensis = Join-Path $env:ProgramFiles 'NSIS\makensis.exe'
+          }
+          if (-not (Test-Path $makensis)) {
+            throw 'makensis.exe was not found after the NSIS installation step'
+          }
+          & $makensis "/DAPP_VERSION=$version" "/DSOURCE_DIR=$source" "/DOUTPUT_DIR=$($output.FullName)" 'packaging\windows\JARVIS.nsi'
           Compress-Archive -Path 'dist\JARVIS\*' -DestinationPath "artifacts\JARVIS-$version-windows-x64-portable.zip"
 
       - name: Create Linux packages
@@ -114,14 +129,14 @@ jobs:
           packaging/linux/build_deb.sh dist/JARVIS "$version" artifacts
           tar -C dist/JARVIS -czf "artifacts/JARVIS-${version}-linux-portable.tar.gz" .
 
-      - name: Create macOS disk image
+      - name: Create macOS app bundle and disk image
         if: runner.os == 'macOS'
         shell: bash
         run: |
           version=${RELEASE_VERSION#v}
           mkdir -p artifacts
           chmod +x packaging/macos/build_dmg.sh
-          packaging/macos/build_dmg.sh dist/JARVIS.app "$version" artifacts
+          packaging/macos/build_dmg.sh dist/JARVIS "$version" artifacts
 
       - name: Upload native artifacts
         uses: actions/upload-artifact@v4

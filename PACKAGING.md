@@ -47,9 +47,9 @@ packaging/linux/build_deb.sh dist/JARVIS 0.1.0 artifacts
 brew install portaudio
 python -m pip install -r requirements-packaging.txt
 PLAYWRIGHT_BROWSERS_PATH=0 python -m playwright install --no-shell chromium
-PLAYWRIGHT_BROWSERS_PATH=0 pyinstaller jarvis.spec --clean --noconfirm
-JARVIS_CONFIG_DIR=/tmp/jarvis-smoke ./dist/JARVIS.app/Contents/MacOS/JARVIS --packaging-smoke-test
-packaging/macos/build_dmg.sh dist/JARVIS.app 0.1.0 artifacts
+packaging/macos/build_standalone.sh
+JARVIS_CONFIG_DIR=/tmp/jarvis-smoke ./dist/JARVIS/JARVIS --packaging-smoke-test
+packaging/macos/build_dmg.sh dist/JARVIS 0.1.0 artifacts
 ```
 
 ## Runtime data
