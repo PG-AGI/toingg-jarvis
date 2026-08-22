@@ -204,7 +204,21 @@ python3 jarvis_launcher.py
 
 ## 🛠️ Installation
 
-### 1. Clone the repository
+### Option A — Native packages (recommended)
+
+Prebuilt installers are generated automatically by CI for every `v*` release tag:
+
+| Platform | Package |
+| --- | --- |
+| Windows | `JARVIS-setup.exe` (Inno Setup installer) |
+| Linux | `jarvis_<version>_amd64.deb` |
+| macOS | `JARVIS-macos.dmg` |
+
+Download them from the repository's [Releases](https://github.com/PG-AGI/toingg-jarvis/releases) page, or build them yourself with `pyinstaller packaging/jarvis.spec` (see `packaging/`).
+
+### Option B — From source
+
+#### 1. Clone the repository
 
 ```bash
 git clone https://github.com/PG-AGI/toingg-jarvis.git

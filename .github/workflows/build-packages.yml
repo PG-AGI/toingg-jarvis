@@ -1,0 +1,111 @@
+name: Build Native Packages
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller numpy sounddevice SpeechRecognition websocket-client rich playwright playwright-stealth requests
+
+      - name: Build executable
+        run: pyinstaller packaging/jarvis.spec
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = (Get-ChildItem "C:\Program Files*\Inno Setup*" -Filter ISCC.exe -Recurse | Select-Object -First 1).FullName
+          & $iscc packaging/windows/installer.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-windows
+          path: |
+            dist/*.exe
+            dist/installer/JARVIS-setup.exe
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y portaudio19-dev devscripts debhelper fakeroot
+          python -m pip install --upgrade pip
+          pip install pyinstaller numpy sounddevice SpeechRecognition websocket-client rich playwright playwright-stealth requests
+
+      - name: Build binary
+        run: pyinstaller packaging/jarvis.spec
+
+      - name: Build .deb package
+        run: bash packaging/linux/build-deb.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-linux
+          path: |
+            dist/*.deb
+            dist/jarvis-linux-*
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          brew install portaudio create-dmg
+          python -m pip install --upgrade pip
+          pip install pyinstaller numpy sounddevice SpeechRecognition websocket-client rich playwright playwright-stealth requests
+
+      - name: Build .app bundle and .dmg
+        run: |
+          pyinstaller packaging/jarvis.spec
+          hdiutil create -volname "JARVIS" -srcfolder dist/JARVIS.app -ov -format UDZO dist/JARVIS-macos.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-macos
+          path: dist/JARVIS-macos.dmg
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-windows, build-linux, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: artifacts
+
+      - name: Attach packages to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**
+          generate_release_notes: true
