@@ -1,6 +1,7 @@
 name: Package JARVIS
 on:
   workflow_dispatch:
+  pull_request:
   push:
     tags: ['v*']
 permissions:
