@@ -1,0 +1,44 @@
+name: Package JARVIS
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  package:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            name: jarvis-windows
+            launcher: JARVIS.bat
+          - os: ubuntu-latest
+            name: jarvis-linux
+            launcher: jarvis_launcher.py
+          - os: macos-latest
+            name: jarvis-macos
+            launcher: JARVIS.command
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install system audio dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes portaudio19-dev
+      - name: Install macOS audio dependencies
+        if: runner.os == 'macOS'
+        run: brew install portaudio
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip pyinstaller -r requirements.txt
+      - name: Build bundle
+        run: pyinstaller --noconfirm --clean --onedir --name JARVIS --hidden-import native_file_manager jarvis_launcher.py
+      - name: Add launcher and docs
+        shell: bash
+        run: mkdir -p dist/JARVIS && cp README.md LICENSE CONTRIBUTING.md config.example.json dist/JARVIS/ && cp "${{ matrix.launcher }}" dist/JARVIS/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/JARVIS
