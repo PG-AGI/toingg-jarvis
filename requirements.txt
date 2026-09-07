@@ -1,0 +1,7 @@
+numpy>=1.24
+websocket-client>=1.6
+rich>=13.0
+SpeechRecognition>=3.10
+playwright>=1.40
+playwright-stealth>=1.0
+pyaudio>=0.2.13
