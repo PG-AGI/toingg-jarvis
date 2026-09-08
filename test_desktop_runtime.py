@@ -58,9 +58,6 @@ class LauncherServiceIntegrationTests(unittest.TestCase):
         self.project = Path(self.directory.name)
         for name in ("jarvis_launcher.py", "native_file_manager.py"):
             shutil.copyfile(Path(__file__).parent / name, self.project / name)
-        launcher = self.project / "jarvis_launcher.py"
-        launcher.write_text("import faulthandler; faulthandler.dump_traceback_later(5)\n" +
-                            launcher.read_text(encoding="utf-8"), encoding="utf-8")
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
             self.port = listener.getsockname()[1]
@@ -123,6 +120,21 @@ class LauncherServiceIntegrationTests(unittest.TestCase):
 
 
 class BrowserSettingsTests(unittest.TestCase):
+    def test_loopback_server_does_not_require_reverse_dns(self):
+        import jarvis_launcher
+        with patch.object(jarvis_launcher, "HTTP_PORT", 0), \
+                patch.object(jarvis_launcher, "_http_started", False), \
+                patch.object(jarvis_launcher, "start_scheduler"), \
+                patch.object(socket, "getfqdn", side_effect=AssertionError("DNS must not run")), \
+                redirect_stdout(io.StringIO()):
+            server = jarvis_launcher.start_http_server(reclaim_port=False)
+            try:
+                self.assertEqual(server.server_name, "localhost")
+                self.assertGreater(server.server_port, 0)
+            finally:
+                server.shutdown()
+                server.server_close()
+
     def test_headless_setting_is_passed_to_real_browser_command(self):
         import jarvis_launcher
         with tempfile.TemporaryDirectory() as temporary:

@@ -991,13 +991,18 @@ def start_http_server(reclaim_port=True):
         def log_message(self, *_): pass   # silence access logs
 
     import socket as _socket
+    from socketserver import TCPServer
     class ReuseHTTPServer(HTTPServer):
         allow_reuse_address = True
         def server_bind(self):
             self.socket.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
-            super().server_bind()
+            # HTTPServer performs reverse DNS here, which can stall macOS startup.
+            # This server is loopback-only; its name is already known.
+            TCPServer.server_bind(self)
+            self.server_name = "localhost"
+            self.server_port = self.socket.getsockname()[1]
 
-    srv = ReuseHTTPServer(("localhost", HTTP_PORT), H)
+    srv = ReuseHTTPServer(("127.0.0.1", HTTP_PORT), H)
     _http_started = True
     start_scheduler()
     threading.Thread(target=srv.serve_forever, daemon=True, name="http-server").start()
