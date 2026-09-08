@@ -44,7 +44,8 @@ class DesktopUITests(unittest.TestCase):
                 self.assertEqual(self.errors, [])
                 return
             time.sleep(0.01)
-        self.fail("Desktop operation timed out; errors=%r" % self.errors)
+        self.fail("Desktop operation timed out; errors=%r; logs=%s" %
+                  (self.errors, self.app.log.get("1.0", "end")))
 
     def test_buttons_save_start_schedule_cancel_and_stop(self):
         self.app.voice.set(False)

@@ -58,6 +58,9 @@ class LauncherServiceIntegrationTests(unittest.TestCase):
         self.project = Path(self.directory.name)
         for name in ("jarvis_launcher.py", "native_file_manager.py"):
             shutil.copyfile(Path(__file__).parent / name, self.project / name)
+        launcher = self.project / "jarvis_launcher.py"
+        launcher.write_text("import faulthandler; faulthandler.dump_traceback_later(5)\n" +
+                            launcher.read_text(encoding="utf-8"), encoding="utf-8")
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
             self.port = listener.getsockname()[1]
@@ -66,7 +69,8 @@ class LauncherServiceIntegrationTests(unittest.TestCase):
 
     def start(self):
         self.service.start({"VOICE_ENABLED": False})
-        self.assertTrue(self.service.ready.wait(timeout=8), "Launcher did not become ready")
+        ready = self.service.ready.wait(timeout=8)
+        self.assertTrue(ready, "Launcher did not become ready; output=%r" % list(self.service.logs.queue))
         self.assertTrue(self.service.running)
 
     def test_start_schedule_cancel_stop_and_restart(self):
