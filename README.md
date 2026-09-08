@@ -184,6 +184,10 @@ All three layers run simultaneously and communicate over `localhost:8766`.
 
 ## 🚀 Quick Start
 
+Prefer native desktop controls? Run `python jarvis_desktop.py` to manage the launcher,
+settings, logs and scheduled actions. See [Desktop controls](DESKTOP_CONTROLS.md) for
+setup, supported backends and process ownership.
+
 ```bash
 # 1. Clone
 git clone https://github.com/PG-AGI/toingg-jarvis.git

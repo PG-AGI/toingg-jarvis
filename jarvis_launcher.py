@@ -631,7 +631,14 @@ def start_browser_client():
         print("  [browser] ⚠  browserClient.py not found"); return
 
     try:
-        _browser_client_proc = subprocess.Popen([sys.executable, BROWSER_CLIENT], cwd=_DIR)
+        command = [sys.executable, BROWSER_CLIENT]
+        try:
+            with open(os.path.join(_DIR, "config.json"), encoding="utf-8") as stream:
+                if json.load(stream).get("BROWSER_HEADLESS", False):
+                    command.append("--headless")
+        except (OSError, ValueError):
+            pass
+        _browser_client_proc = subprocess.Popen(command, cwd=_DIR)
         print("  [browser] ✅ browserClient.py started")
     except Exception as e:
         print(f"  [browser] ⚠  Failed to start browserClient.py: {e}")
@@ -729,14 +736,12 @@ def _kill_port(port):
     except Exception:
         pass
 
-def start_http_server():
+def start_http_server(reclaim_port=True):
     global _http_started
     if _http_started:
         return
-    _http_started = True
-
-    _kill_port(HTTP_PORT)
-    start_scheduler()
+    if reclaim_port:
+        _kill_port(HTTP_PORT)
 
     from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -986,15 +991,23 @@ def start_http_server():
         def log_message(self, *_): pass   # silence access logs
 
     import socket as _socket
+    from socketserver import TCPServer
     class ReuseHTTPServer(HTTPServer):
         allow_reuse_address = True
         def server_bind(self):
             self.socket.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
-            super().server_bind()
+            # HTTPServer performs reverse DNS here, which can stall macOS startup.
+            # This server is loopback-only; its name is already known.
+            TCPServer.server_bind(self)
+            self.server_name = "localhost"
+            self.server_port = self.socket.getsockname()[1]
 
-    srv = ReuseHTTPServer(("localhost", HTTP_PORT), H)
+    srv = ReuseHTTPServer(("127.0.0.1", HTTP_PORT), H)
+    _http_started = True
+    start_scheduler()
     threading.Thread(target=srv.serve_forever, daemon=True, name="http-server").start()
     print(f"  [http] Server listening on http://localhost:{HTTP_PORT}/")
+    return srv
 
 # ── APP HELPERS (unchanged) ───────────────────────────────────────────────────
 def resolve_path(path):
@@ -1323,7 +1336,18 @@ def check_api_key():
             print("  ⚠   Invalid choice. Enter 1, 2, 3, Q, or paste your API key.\n", flush=True)
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
-def main():
+def main(argv=None):
+    import argparse
+    parser = argparse.ArgumentParser(description="JARVIS voice and browser launcher")
+    parser.add_argument("--desktop-managed", action="store_true",
+                        help="Run under desktop control; stop when stdin closes or receives stop")
+    parser.add_argument("--no-voice", action="store_true", help="Disable the wake-word microphone listener")
+    parser.add_argument("--http-port", type=int, default=8766, help="Local control port (default: 8766)")
+    args = parser.parse_args(argv)
+    if not 1 <= args.http_port <= 65535:
+        parser.error("--http-port must be between 1 and 65535")
+    global HTTP_PORT
+    HTTP_PORT = args.http_port
     print("""
   ╔══════════════════════════════════════════╗
   ║   W E E S T R E A M  //  J A R V I S    ║
@@ -1337,24 +1361,49 @@ def main():
   Ctrl+C to stop.
 """)
 
-    check_api_key()
+    if not args.desktop_managed:
+        check_api_key()
 
     print(f"  📄  Web HTML : {WEB_HTML}")
     print(f"  🌐  Server   : http://localhost:{HTTP_PORT}/\n")
 
-    start_http_server()
+    server = start_http_server(reclaim_port=not args.desktop_managed)
 
     threads = [
         threading.Thread(target=voice_listener, daemon=True, name="voice"),
     ]
-    for t in threads:
-        t.start()
+    if not args.no_voice:
+        for t in threads:
+            t.start()
+
+    stopped = threading.Event()
+    if args.desktop_managed:
+        def listen_for_stop():
+            for line in sys.stdin:
+                if line.strip() == "stop":
+                    break
+            stopped.set()
+        threading.Thread(target=listen_for_stop, daemon=True).start()
+        print("JARVIS_DESKTOP_READY", flush=True)
 
     try:
-        while True:
-            time.sleep(0.5)
+        while not stopped.wait(0.5):
+            pass
     except KeyboardInterrupt:
         print("\n  Stopped.")
+    finally:
+        if args.desktop_managed:
+            server.shutdown()
+            server.server_close()
+            close_all_url_windows()
+            for proc in (_browser_client_proc, _visual_proc, _web_proc):
+                if proc is not None and proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait(timeout=3)
 
 if __name__ == "__main__":
     main()
