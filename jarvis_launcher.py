@@ -764,6 +764,15 @@ def start_http_server():
                 self.send_response(404); self.end_headers()
                 self.wfile.write(os.path.basename(path).encode() + b" not found")
 
+        def _send_json(self, status, payload):
+            data = json.dumps(payload).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self._cors()
+            self.end_headers()
+            self.wfile.write(data)
+
         def do_GET(self):
             if self.path in ("/", "/index.html"):
                 self._serve_file(WEB_HTML)
@@ -871,14 +880,14 @@ def start_http_server():
             elif self.path == "/schedule_action":
                 try:
                     payload = json.loads(body) if body else {}
+                    if not isinstance(payload, dict):
+                        raise ValueError("payload must be a JSON object")
                     item = create_scheduled_action(payload)
-                    self.send_response(201)
-                    self.send_header("Content-Type", "application/json")
-                    self._cors()
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"ok": True, "item": item}).encode())
                 except Exception as e:
                     print(f"  [schedule] schedule_action error: {e}")
+                    self._send_json(400, {"ok": False, "error": str(e)})
+                else:
+                    self._send_json(201, {"ok": True, "item": item})
             elif self.path == "/file_action":
                 try:
                     payload = json.loads(body) if body else {}
@@ -935,21 +944,13 @@ def start_http_server():
             elif self.path == "/cancel_scheduled_action":
                 try:
                     payload = json.loads(body) if body else {}
+                    if not isinstance(payload, dict):
+                        raise ValueError("payload must be a JSON object")
                     cancelled = cancel_scheduled_action(str(payload.get("id", "")))
-                    self.send_response(200 if cancelled else 404)
-                    self.send_header("Content-Type", "application/json")
-                    self._cors()
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"ok": cancelled}).encode())
                 except Exception as e:
-                    self.send_response(400)
-                except Exception as e:
-                    print(f"  [file] unexpected error: {e}")
-                    self.send_response(500)
-                    self.send_header("Content-Type", "application/json")
-                    self._cors()
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+                    self._send_json(400, {"ok": False, "error": str(e)})
+                else:
+                    self._send_json(200 if cancelled else 404, {"ok": cancelled})
 
             elif self.path == "/config":
                 try:
