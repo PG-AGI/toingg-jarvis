@@ -1,0 +1,109 @@
+name: Build native packages
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Linux audio build dependency
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes portaudio19-dev dpkg-dev
+
+      - name: Install macOS audio build dependency
+        if: runner.os == 'macOS'
+        run: brew install portaudio
+
+      - name: Install Python dependencies
+        shell: bash
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt pyinstaller
+
+      - name: Build Windows executable
+        if: runner.os == 'Windows'
+        shell: bash
+        run: pyinstaller --clean --noconfirm --onefile --name toingg-jarvis jarvis_launcher.py
+
+      - name: Build Linux executable
+        if: runner.os == 'Linux'
+        run: pyinstaller --clean --noconfirm --onefile --name toingg-jarvis jarvis_launcher.py
+
+      - name: Build macOS app bundle
+        if: runner.os == 'macOS'
+        run: pyinstaller --clean --noconfirm --windowed --name Toingg-Jarvis jarvis_launcher.py
+
+      - name: Package Windows artifact
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist/toingg-jarvis.exe,README.md,LICENSE -DestinationPath dist/toingg-jarvis-windows.zip
+
+      - name: Package Linux artifacts
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p package/usr/local/bin package/DEBIAN
+          install -m 0755 dist/toingg-jarvis package/usr/local/bin/toingg-jarvis
+          cat > package/DEBIAN/control <<'EOF'
+          Package: toingg-jarvis
+          Version: 1.0.0
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Maintainer: PG-AGI
+          Description: Toingg JARVIS desktop assistant
+          EOF
+          dpkg-deb --build package dist/toingg-jarvis-linux.deb
+          tar -czf dist/toingg-jarvis-linux.tar.gz -C dist toingg-jarvis
+
+      - name: Package macOS artifacts
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent dist/Toingg-Jarvis.app dist/toingg-jarvis-macos.zip
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: toingg-jarvis-${{ runner.os }}
+          path: dist/toingg-jarvis-*
+          if-no-files-found: error
+
+  release:
+    name: Publish release assets
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: toingg-jarvis-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Attach assets to the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
