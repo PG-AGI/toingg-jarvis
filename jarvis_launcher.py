@@ -611,6 +611,16 @@ def execute_playwright_tool_action(payload):
         page.wait_for_timeout(int(payload.get("timeout", 1000)))
         return {"action": action}
 
+    if action == "input_file":
+        selector = str(payload.get("selector", "")).strip()
+        path = str(payload.get("path", "")).strip()
+        if not selector or not path:
+            raise ValueError("input_file action requires selector and path")
+        if not os.path.exists(path):
+            raise ValueError(f"file not found at path: {path}")
+        page.set_input_files(selector, path, timeout=timeout)
+        return {"action": action, "selector": selector, "path": path}
+
     raise ValueError(f"unsupported playwright action: {action}")
 
 def execute_playwright_tool_actions(actions):
@@ -892,6 +902,41 @@ def start_http_server():
                     self.wfile.write(json.dumps(response).encode())
                 except (NativeFileActionError, json.JSONDecodeError) as e:
                     print(f"  [file] action error: {e}")
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+
+            elif self.path == "/api/uploads":
+                try:
+                    import email
+                    content_type = self.headers.get("Content-Type", "")
+                    if "multipart/form-data" not in content_type:
+                        raise ValueError("Expected multipart/form-data")
+                    msg_bytes = f"Content-Type: {content_type}\r\n\r\n".encode("utf-8") + body
+                    msg = email.message_from_bytes(msg_bytes)
+                    saved_files = []
+                    for part in msg.walk():
+                        if part.get_content_maintype() == "multipart":
+                            continue
+                        filename = part.get_filename()
+                        if filename:
+                            data = part.get_payload(decode=True)
+                            if data:
+                                ext = os.path.splitext(filename)[1]
+                                fd, temp_path = tempfile.mkstemp(suffix=ext, prefix="jarvis_upload_")
+                                with os.fdopen(fd, "wb") as f:
+                                    f.write(data)
+                                saved_files.append({"filename": filename, "path": temp_path})
+                    print(f"  [upload] saved {len(saved_files)} file(s)")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": True, "files": saved_files}).encode())
+                except Exception as e:
+                    print(f"  [upload] error: {e}")
                     self.send_response(400)
                     self.send_header("Content-Type", "application/json")
                     self._cors()

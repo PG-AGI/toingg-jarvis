@@ -63,6 +63,7 @@ TOOL_DEFINITIONS = [
                 "selector": {"type": "string"},
                 "value": {"type": "string"},
                 "url": {"type": "string"},
+                "path": {"type": "string"},
                 "timeout": {"type": "integer"},
             },
             "required": ["action"],
