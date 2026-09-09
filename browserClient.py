@@ -754,6 +754,17 @@ class BrowserClient:
                 log.info("Type action completed: target=%s page=%s", target, page.url)
                 return {"success": True, "result": f"Typed into {target}"}
 
+            elif action == "input_file":
+                selector = params.get("selector")
+                path = params.get("path")
+                if not selector or not path:
+                    return {"success": False, "error": "input_file requires selector and path"}
+                import os
+                if not os.path.exists(path):
+                    return {"success": False, "error": f"File not found: {path}"}
+                page.locator(selector).set_input_files(path, timeout=params.get("timeout", 10000))
+                return {"success": True, "result": f"Set input file '{path}' on '{selector}'"}
+
             elif action == "get_text":
                 selector = params.get("selector")
                 max_chars = params.get("max_chars", 3000)
