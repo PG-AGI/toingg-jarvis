@@ -378,6 +378,7 @@ def close_all_url_windows(auto=False):
 # ── JARVIS WINDOWS ────────────────────────────────────────────────────────────
 _scheduled_actions = {}
 _scheduled_actions_lock = threading.Lock()
+_scheduled_actions_changed = threading.Condition(_scheduled_actions_lock)
 _scheduler_started = False
 
 def _utc_now():
@@ -471,20 +472,36 @@ def list_scheduled_actions():
         return sorted(_scheduled_actions.values(), key=lambda item: item["scheduled_for"])
 
 def cancel_scheduled_action(action_id):
-    with _scheduled_actions_lock:
+    with _scheduled_actions_changed:
         item = _scheduled_actions.get(action_id)
         if not item:
             return False
         item["status"] = "cancelled"
+        _scheduled_actions_changed.notify_all()
         return True
+
+def _scheduled_action_cancelled(item):
+    with _scheduled_actions_lock:
+        return item["status"] == "cancelled"
+
+def _wait_for_scheduled_action(item, seconds):
+    """Wait between actions, returning early when this job is cancelled."""
+    with _scheduled_actions_changed:
+        return _scheduled_actions_changed.wait_for(
+            lambda: item["status"] == "cancelled",
+            timeout=max(0, float(seconds)),
+        )
 
 def _execute_scheduled_actions(item):
     global _url_slot
     try:
         for action in item["actions"]:
+            if _scheduled_action_cancelled(item):
+                return
             action_type = action["type"]
             if action_type in ("wait", "sleep"):
-                time.sleep(max(0, float(action.get("seconds", 0))))
+                if _wait_for_scheduled_action(item, action.get("seconds", 0)):
+                    return
             elif action_type in ("open_url", "open_window"):
                 url = str(action.get("url", "")).strip()
                 if not url:
@@ -498,27 +515,39 @@ def _execute_scheduled_actions(item):
                     raise ValueError("open_tabs action needs tabs or urls list")
                 close_all_url_windows()
                 for index, tab in enumerate(tabs[:4]):
+                    if _scheduled_action_cancelled(item):
+                        return
                     url = tab.get("url", tab) if isinstance(tab, dict) else str(tab)
                     open_url_in_slot(url, index % 4, tab)
-                    time.sleep(0.4)
+                    if _wait_for_scheduled_action(item, 0.4):
+                        return
             elif action_type == "close_tabs":
                 close_all_url_windows(auto=bool(action.get("auto", False)))
             else:
                 raise ValueError(f"unsupported scheduled action: {action_type}")
-        item["status"] = "completed"
+        with _scheduled_actions_lock:
+            if item["status"] == "cancelled":
+                return
+            item["status"] = "completed"
         print(f"  [schedule] completed {item['id']}")
     except Exception as exc:
-        item["status"] = "failed"
-        item["last_error"] = str(exc)
-        print(f"  [schedule] failed {item['id']}: {exc}")
-    trigger = item.get("trigger", {})
-    if isinstance(trigger, dict) and str(trigger.get("type", "")).lower() in ("daily", "recurring"):
-        try:
-            item["scheduled_for"] = _next_schedule_time(trigger).isoformat()
-            item["status"] = "scheduled"
-        except Exception as exc:
+        with _scheduled_actions_lock:
+            if item["status"] == "cancelled":
+                return
             item["status"] = "failed"
             item["last_error"] = str(exc)
+        print(f"  [schedule] failed {item['id']}: {exc}")
+    with _scheduled_actions_lock:
+        if item["status"] == "cancelled":
+            return
+        trigger = item.get("trigger", {})
+        if isinstance(trigger, dict) and str(trigger.get("type", "")).lower() in ("daily", "recurring"):
+            try:
+                item["scheduled_for"] = _next_schedule_time(trigger).isoformat()
+                item["status"] = "scheduled"
+            except Exception as exc:
+                item["status"] = "failed"
+                item["last_error"] = str(exc)
 
 def _scheduler_loop():
     while True:

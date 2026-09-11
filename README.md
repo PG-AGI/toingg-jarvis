@@ -400,6 +400,8 @@ Supported triggers:
 
 Supported action types are `open_url`, `open_tabs`, `wait`, and `close_tabs`. Use `GET /scheduled_actions` to inspect queued actions and `POST /cancel_scheduled_action` with `{ "id": "..." }` to cancel one.
 
+Cancellation also applies to running jobs: it interrupts waits, skips subsequent actions and remaining tabs in a batch, and prevents daily jobs from being scheduled again. An action already in progress may finish; cancellation does not undo it.
+
 ---
 
 ## 📄 Data Requirements
