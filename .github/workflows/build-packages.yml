@@ -1,0 +1,56 @@
+name: Build Packages
+
+on:
+  workflow_dispatch:
+  release:
+    types: [created]
+
+jobs:
+  build-packages:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: windows-installer
+          - os: ubuntu-latest
+            artifact: linux-package
+          - os: macos-latest
+            artifact: macos-app
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install packaging tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+
+      - name: Build application bundle
+        run: |
+          mkdir -p dist
+          pyinstaller --name toingg-jarvis --onefile jarvis_launcher.py
+          cp -r JARVIS_README.md dist/ 2>/dev/null || true
+
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        run: |
+          choco install innosetup -y
+          iscc packaging/windows/toingg-jarvis.iss
+
+      - name: Build Linux package
+        if: runner.os == 'Linux'
+        run: |
+          chmod +x packaging/linux/build-deb.sh
+          packaging/linux/build-deb.sh
+
+      - name: Build macOS bundle
+        if: runner.os == 'macOS'
+        run: |
+          chmod +x packaging/macos/build-app.sh
+          packaging/macos/build-app.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: toingg-jarvis-${{ matrix.artifact }}
+          path: dist
