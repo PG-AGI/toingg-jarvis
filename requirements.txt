@@ -1,0 +1,12 @@
+# JARVIS runtime dependencies (Windows installer slice for #13).
+# Install:  pip install -r requirements.txt
+# Then:     python -m playwright install chromium
+numpy
+websocket-client
+rich
+SpeechRecognition
+playwright
+playwright-stealth
+# NOTE: PyAudio (microphone input) has no official Windows wheel.
+# On Windows use:  pip install pipwin && pipwin install pyaudio
+# The PyInstaller build does not require PyAudio (imported lazily at runtime only).

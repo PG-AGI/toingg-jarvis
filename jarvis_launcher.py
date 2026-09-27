@@ -21,7 +21,20 @@ from datetime import datetime, timedelta, timezone
 from native_file_manager import NativeFileActionError, handle_file_action_payload
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
-_DIR        = os.path.dirname(os.path.abspath(__file__))
+__version__ = "2.0.0"
+
+
+def _base_dir():
+    """Repo root in dev, bundle root when frozen (PyInstaller one-dir/one-file)."""
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(sys.executable)
+        if os.path.exists(os.path.join(exe_dir, "jarvis_web.html")):
+            return exe_dir
+        return getattr(sys, "_MEIPASS", exe_dir)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+_DIR        = _base_dir()
 WEB_HTML    = os.path.join(_DIR, "jarvis_web.html")
 VISUAL_HTML = os.path.join(_DIR, "jarvis_visual.html")
 BROWSER_CLIENT = os.path.join(_DIR, "browserClient.py")
@@ -627,11 +640,16 @@ def start_browser_client():
     global _browser_client_proc
     if _browser_client_proc and _browser_client_proc.poll() is None:
         print("  [browser] already running"); return
-    if not os.path.exists(BROWSER_CLIENT):
+    if not getattr(sys, "frozen", False) and not os.path.exists(BROWSER_CLIENT):
         print("  [browser] ⚠  browserClient.py not found"); return
 
+    if getattr(sys, "frozen", False):
+        # Frozen bundle: browser client runs as a mode of this exe (no python on target).
+        cmd = [sys.executable, "--browser-client"]
+    else:
+        cmd = [sys.executable, BROWSER_CLIENT]
     try:
-        _browser_client_proc = subprocess.Popen([sys.executable, BROWSER_CLIENT], cwd=_DIR)
+        _browser_client_proc = subprocess.Popen(cmd, cwd=_DIR)
         print("  [browser] ✅ browserClient.py started")
     except Exception as e:
         print(f"  [browser] ⚠  Failed to start browserClient.py: {e}")
@@ -1357,4 +1375,14 @@ def main():
         print("\n  Stopped.")
 
 if __name__ == "__main__":
-    main()
+    if "--browser-client" in sys.argv:
+        from browserClient import main as _browser_main
+        _browser_main()
+    elif "--version" in sys.argv or "-V" in sys.argv:
+        print(f"jarvis_launcher {__version__}")
+    elif "--help" in sys.argv or "-h" in sys.argv:
+        print("Usage: jarvis_launcher [--help] [--version] [--browser-client]")
+        print("  (no flags)        start the JARVIS web launcher (voice trigger + :8766 server)")
+        print("  --browser-client  run the bundled browser-automation client instead")
+    else:
+        main()
