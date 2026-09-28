@@ -19,7 +19,7 @@ def _target_path(raw_path):
 
 
 def _validate_target(action, target):
-    if action not in SUPPORTED_ACTIONS:
+    if not isinstance(action, str) or action not in SUPPORTED_ACTIONS:
         raise NativeFileActionError(
             f"action must be one of: {', '.join(sorted(SUPPORTED_ACTIONS))}"
         )
@@ -86,10 +86,13 @@ def execute_file_action(action, path, dry_run=False, system=None):
 
 
 def handle_file_action_payload(payload):
+    """Dispatch a JSON object with a string action and optional boolean dry_run."""
     if not isinstance(payload, dict):
         raise NativeFileActionError("payload must be a JSON object")
 
     action = payload.get("action")
     path = payload.get("path")
-    dry_run = bool(payload.get("dry_run", False))
+    dry_run = payload.get("dry_run", False)
+    if not isinstance(dry_run, bool):
+        raise NativeFileActionError("dry_run must be a boolean")
     return execute_file_action(action, path, dry_run=dry_run)
