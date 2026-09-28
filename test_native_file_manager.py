@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from native_file_manager import (
     NativeFileActionError,
@@ -74,6 +75,30 @@ class NativeFileManagerTests(unittest.TestCase):
         self.assertEqual(result["action"], "open_file")
         self.assertEqual(result["path"], str(self.file_path.resolve()))
         self.assertIn(str(self.file_path.resolve()), result["command"])
+
+    @patch("native_file_manager.subprocess.Popen")
+    def test_payload_rejects_non_string_actions_without_launching(self, popen):
+        for action in ([], {}, None, True, 123):
+            with self.subTest(action=action), self.assertRaisesRegex(NativeFileActionError, "action must be one of"):
+                handle_file_action_payload({"action": action, "path": str(self.file_path)})
+        popen.assert_not_called()
+
+    @patch("native_file_manager.subprocess.Popen")
+    def test_payload_requires_boolean_dry_run(self, popen):
+        for dry_run in ("false", "true", "", 0, 1, None, [], {}):
+            with self.subTest(dry_run=dry_run), self.assertRaisesRegex(NativeFileActionError, "dry_run must be a boolean"):
+                handle_file_action_payload({"action": "open_file", "path": str(self.file_path), "dry_run": dry_run})
+        popen.assert_not_called()
+
+    @patch("native_file_manager.subprocess.Popen")
+    def test_boolean_dry_run_and_default_keep_existing_behavior(self, popen):
+        payload = {"action": "open_file", "path": str(self.file_path)}
+        handle_file_action_payload({**payload, "dry_run": True})
+        popen.assert_not_called()
+        handle_file_action_payload({**payload, "dry_run": False})
+        self.assertEqual(popen.call_count, 1)
+        handle_file_action_payload(payload)
+        self.assertEqual(popen.call_count, 2)
 
     def test_validation_rejects_invalid_actions_and_paths(self):
         with self.assertRaises(NativeFileActionError):

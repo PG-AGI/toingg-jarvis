@@ -32,6 +32,10 @@ The helper validates paths before launching native tools.
 Use `"dry_run": true` to preview the planned native command without opening
 any OS windows:
 
+`dry_run` must be a JSON boolean when supplied; strings such as `"false"`,
+numbers, and `null` are rejected with HTTP 400. Omitting it defaults to `false`.
+The `action` field must be one of the supported action strings.
+
 ```json
 {
   "action": "open_file",
