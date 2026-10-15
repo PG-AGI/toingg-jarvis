@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -72,16 +73,35 @@ class UploadStore:
     def __init__(self, root: str | os.PathLike[str] | None = None, ttl_seconds: int = UPLOAD_TTL_SECONDS):
         configured_root = root or os.environ.get("JARVIS_UPLOAD_DIR")
         self.root = Path(configured_root or Path(tempfile.gettempdir()) / "jarvis_uploads")
+        self._owns_root = configured_root is None
         self.ttl_seconds = ttl_seconds
 
+    @staticmethod
+    def _set_private_mode(path: Path, mode: int) -> None:
+        """Restrict upload storage permissions on platforms with POSIX modes."""
+        if os.name == "posix":
+            path.chmod(mode)
+
+    def _ensure_root(self) -> None:
+        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if self._owns_root:
+            self._set_private_mode(self.root, 0o700)
+
+    def _token_directory(self, token: str) -> Path:
+        token_hash = hashlib.sha256(token.encode("ascii")).hexdigest()
+        return self.root / token_hash
+
     def save(self, upload: PendingUpload, now: float | None = None) -> dict:
+        self._ensure_root()
         self.cleanup_expired(now=now)
         token = str(uuid.uuid4())
-        directory = self.root / token
-        directory.mkdir(parents=True, exist_ok=False)
+        directory = self._token_directory(token)
+        directory.mkdir(mode=0o700, exist_ok=False)
+        self._set_private_mode(directory, 0o700)
         filename = Path(upload.filename).name or "upload"
         path = directory / filename
         path.write_bytes(upload.data)
+        self._set_private_mode(path, 0o600)
         created_at = time.time() if now is None else now
         metadata = {
             "token": token,
@@ -90,7 +110,9 @@ class UploadStore:
             "size": len(upload.data),
             "created_at": created_at,
         }
-        (directory / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+        metadata_path = directory / "metadata.json"
+        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+        self._set_private_mode(metadata_path, 0o600)
         return metadata
 
     def resolve(self, token: str, now: float | None = None) -> Path:
@@ -102,7 +124,7 @@ class UploadStore:
         if normalized != token.lower():
             raise UploadError("Invalid upload token")
 
-        directory = self.root / normalized
+        directory = self._token_directory(normalized)
         metadata_path = directory / "metadata.json"
         try:
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -124,7 +146,7 @@ class UploadStore:
             normalized = str(uuid.UUID(str(token).strip()))
         except (ValueError, AttributeError):
             return
-        shutil.rmtree(self.root / normalized, ignore_errors=True)
+        shutil.rmtree(self._token_directory(normalized), ignore_errors=True)
 
     def cleanup_expired(self, now: float | None = None) -> None:
         if not self.root.exists():

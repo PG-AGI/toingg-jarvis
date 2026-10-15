@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from unittest.mock import Mock
@@ -33,7 +34,7 @@ class BrowserUploadActionTests(unittest.TestCase):
 
         self.assertEqual(count, 2)
         paths = self.page.set_input_files.call_args.args[1]
-        self.assertEqual([path.rsplit("/", 1)[-1] for path in paths], ["first.png", "second.jpg"])
+        self.assertEqual([os.path.basename(path) for path in paths], ["first.png", "second.jpg"])
         for token in (first["token"], second["token"]):
             with self.assertRaises(UploadError):
                 self.store.resolve(token)

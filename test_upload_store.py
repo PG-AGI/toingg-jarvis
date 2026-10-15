@@ -1,6 +1,9 @@
+import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from upload_store import (
     MAX_UPLOAD_BYTES,
@@ -76,6 +79,27 @@ class UploadStoreTests(unittest.TestCase):
         self.assertEqual(path.name, "screenshot.png")
         self.assertEqual(path.read_bytes(), b"image")
         self.assertEqual(path.parent.parent, Path(self.tmpdir.name))
+        self.assertNotEqual(path.parent.name, metadata["token"])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX file permissions are not available")
+    def test_save_restricts_upload_permissions(self):
+        metadata = self.store.save(PendingUpload("private.png", "image/png", b"image"))
+        image_path = self.store.resolve(metadata["token"])
+        token_dir = image_path.parent
+        metadata_path = token_dir / "metadata.json"
+
+        self.assertEqual(stat.S_IMODE(token_dir.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(image_path.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(metadata_path.stat().st_mode), 0o600)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX file permissions are not available")
+    def test_default_upload_root_is_private(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            with patch("upload_store.tempfile.gettempdir", return_value=temp_root):
+                store = UploadStore()
+                store.save(PendingUpload("private.png", "image/png", b"image"))
+
+            self.assertEqual(stat.S_IMODE(store.root.stat().st_mode), 0o700)
 
     def test_resolve_rejects_invalid_and_expired_tokens(self):
         with self.assertRaises(UploadError):
