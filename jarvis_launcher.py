@@ -1,6 +1,10 @@
 """
 JARVIS LAUNCHER  v2.0
 =====================
+Cross-platform packaging and native installers for Windows, Linux, and macOS
+Automated builds through GitHub Actions
+Versioned releases
+Signed binaries where possible
 Wake trigger / voice command → opens jarvis_web.html in Chrome.
 
 HTTP server on :8766:
