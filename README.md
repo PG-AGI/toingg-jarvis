@@ -118,6 +118,7 @@ All three layers run simultaneously and communicate over `localhost:8766`.
 **🎙️ Voice Interaction**
 - Wake-word activation — just say **"Hey Jarvis"**
 - Real-time WebSocket streaming to Toingg AI
+- Temporary image uploads for Playwright file inputs
 - Barge-in support while AI is speaking
 - SpeechRecognition + Web Speech API
 
@@ -153,6 +154,33 @@ All three layers run simultaneously and communicate over `localhost:8766`.
 </td>
 </tr>
 </table>
+
+### Uploading images for browser automation
+
+The launcher accepts PNG, JPEG, GIF, WebP, and other `image/*` uploads at
+`POST http://localhost:8766/api/uploads`. Send one or more multipart file
+fields:
+
+```bash
+curl -F "files=@screenshot.png" http://localhost:8766/api/uploads
+```
+
+The response contains an opaque token for each image. Pass either `token` or
+`tokens` to the browser WebSocket action:
+
+```json
+{
+  "action": "input_file",
+  "params": {
+    "selector": "input[type=file]",
+    "tokens": ["550e8400-e29b-41d4-a716-446655440000"]
+  }
+}
+```
+
+Each image is limited to 10 MB and each request to 25 MB. Tokens expire after
+one hour and are deleted immediately after the browser action attempts to use
+them. The API never returns or accepts server filesystem paths.
 
 ---
 
