@@ -723,6 +723,18 @@ def start_http_server():
         def do_POST(self):
             global _url_slot
             if self.path == "/api/uploads":
+                origin = self.headers.get("Origin")
+                allowed_origins = {
+                    "http://localhost:8766",
+                    "http://127.0.0.1:8766",
+                }
+                if origin and origin not in allowed_origins:
+                    self.send_response(403)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    self.wfile.write(b'{"ok":false,"error":"Cross-origin uploads are not allowed"}')
+                    return
                 try:
                     length = int(self.headers.get("Content-Length", 0))
                     if length <= 0:
