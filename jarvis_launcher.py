@@ -21,7 +21,37 @@ from datetime import datetime, timedelta, timezone
 from native_file_manager import NativeFileActionError, handle_file_action_payload
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
-_DIR        = os.path.dirname(os.path.abspath(__file__))
+APP_VERSION = "2.0.0"
+
+
+def _resources_dir():
+    """PyInstaller unpacks bundled HTML beside its Python modules."""
+    if getattr(sys, "frozen", False):
+        return str(sys._MEIPASS)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def _writable_state_dir():
+    """Never write API keys or browser profiles inside a signed/read-only bundle."""
+    if not getattr(sys, "frozen", False):
+        return _resources_dir()  # Keep existing source-checkout behaviour.
+    system = _plat.system()
+    if system == "Windows":
+        return os.path.join(
+            os.environ.get("APPDATA") or os.path.expanduser("~"), "JARVIS"
+        )
+    if system == "Darwin":
+        return os.path.join(os.path.expanduser("~"), "Library", "Application Support", "JARVIS")
+    return os.path.join(
+        os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "jarvis"
+    )
+
+
+def _config_path():
+    return os.path.join(_writable_state_dir(), "config.json")
+
+
+_DIR        = _resources_dir()
 WEB_HTML    = os.path.join(_DIR, "jarvis_web.html")
 VISUAL_HTML = os.path.join(_DIR, "jarvis_visual.html")
 BROWSER_CLIENT = os.path.join(_DIR, "browserClient.py")
@@ -627,11 +657,21 @@ def start_browser_client():
     global _browser_client_proc
     if _browser_client_proc and _browser_client_proc.poll() is None:
         print("  [browser] already running"); return
-    if not os.path.exists(BROWSER_CLIENT):
+    frozen = getattr(sys, "frozen", False)
+    if not frozen and not os.path.exists(BROWSER_CLIENT):
         print("  [browser] ⚠  browserClient.py not found"); return
 
     try:
-        _browser_client_proc = subprocess.Popen([sys.executable, BROWSER_CLIENT], cwd=_DIR)
+        if frozen:
+            state_dir = _writable_state_dir()
+            os.makedirs(state_dir, mode=0o700, exist_ok=True)
+            # Launch the frozen entry point, not a missing system Python/script.
+            command = [sys.executable, "--browser-client"]
+            workdir = state_dir
+        else:
+            command = [sys.executable, BROWSER_CLIENT]
+            workdir = _DIR
+        _browser_client_proc = subprocess.Popen(command, cwd=workdir)
         print("  [browser] ✅ browserClient.py started")
     except Exception as e:
         print(f"  [browser] ⚠  Failed to start browserClient.py: {e}")
@@ -770,7 +810,7 @@ def start_http_server():
             elif self.path in ("/visual", "/visual.html"):
                 self._serve_file(VISUAL_HTML)
             elif self.path == "/config.json":
-                self._serve_file(os.path.join(_DIR, "config.json"), "application/json")
+                self._serve_file(_config_path(), "application/json")
             elif self.path == "/state":
                 with _http_state_lock:
                     data = json.dumps(_http_state).encode()
@@ -957,7 +997,7 @@ def start_http_server():
                     token = payload.get("token", "").strip()
                     if not token:
                         raise ValueError("token is empty")
-                    cfg_path = os.path.join(_DIR, "config.json")
+                    cfg_path = _config_path()
                     try:
                         with open(cfg_path, "r") as f:
                             cfg = json.load(f)
@@ -1219,7 +1259,7 @@ def _is_valid_token(token):
     return len(token) >= 20 and token.lower() not in _PLACEHOLDER_TOKENS
 
 def _load_token():
-    cfg_path = os.path.join(_DIR, "config.json")
+    cfg_path = _config_path()
     try:
         with open(cfg_path, "r") as f:
             return json.load(f).get("TOKEN", "").strip()
@@ -1227,15 +1267,20 @@ def _load_token():
         return ""
 
 def _save_token(token):
-    cfg_path = os.path.join(_DIR, "config.json")
+    cfg_path = _config_path()
     try:
         with open(cfg_path, "r") as f:
             cfg = json.load(f)
     except Exception:
         cfg = {}
     cfg["TOKEN"] = token
-    with open(cfg_path, "w") as f:
+    os.makedirs(os.path.dirname(cfg_path), mode=0o700, exist_ok=True)
+    # Protect the token even when the default umask is permissive.
+    fd = os.open(cfg_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
         json.dump(cfg, f, indent=2)
+    if os.name != "nt":
+        os.chmod(cfg_path, 0o600)
 
 def _prompt(text):
     print(text, end="", flush=True)
@@ -1356,5 +1401,41 @@ def main():
     except KeyboardInterrupt:
         print("\n  Stopped.")
 
+def _dispatch_cli(argv=None):
+    """Safe smoke-test switches: never prompt for API credentials during builds."""
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv == ["--version"]:
+        print(f"JARVIS {APP_VERSION}")
+        return True
+    if argv in (["--help"], ["-h"]):
+        print("Usage: JARVIS [--help] [--version] [--install-browser] [--browser-client [options]]")
+        print("No options: start the local voice launcher.")
+        return True
+    if argv[:1] == ["--browser-client"]:
+        import browserClient
+        previous_argv = sys.argv
+        try:
+            sys.argv = [BROWSER_CLIENT] + argv[1:]
+            browserClient.main()
+        finally:
+            sys.argv = previous_argv
+        return True
+    if argv == ["--install-browser"]:
+        # Installs the open-source Chromium runtime into Playwright's normal
+        # per-user cache; never requires a provider account or a system Python.
+        from playwright.__main__ import main as playwright_main
+        previous_argv = sys.argv
+        try:
+            sys.argv = ["playwright", "install", "chromium"]
+            playwright_main()
+        finally:
+            sys.argv = previous_argv
+        return True
+    if argv:
+        raise SystemExit("Unknown options. Run JARVIS --help.")
+    return False
+
+
 if __name__ == "__main__":
-    main()
+    if not _dispatch_cli():
+        main()

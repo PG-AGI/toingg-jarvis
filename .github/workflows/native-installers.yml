@@ -1,0 +1,129 @@
+name: Native installers
+
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  source-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m unittest discover -p 'test_*.py' -v
+      - run: python -m compileall -q jarvis_launcher.py browserClient.py native_file_manager.py packaging
+
+  native-builds:
+    name: Bundle / ${{ matrix.platform }}
+    needs: source-tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+          - os: macos-15
+            platform: macos
+          - os: windows-latest
+            platform: windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Linux audio build headers
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y portaudio19-dev libasound2-dev
+      - name: macOS audio build headers
+        if: matrix.platform == 'macos'
+        run: brew install portaudio
+      - name: Install isolated build dependencies
+        run: python -m pip install -r packaging/requirements-build.txt
+      - name: Build one-directory PyInstaller application
+        run: python -m PyInstaller --noconfirm --clean jarvis.spec
+      - name: Smoke test Windows bundle (no API token)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          & ".\dist\JARVIS\JARVIS.exe" --version
+          & ".\dist\JARVIS\JARVIS.exe" --help
+          & ".\dist\JARVIS\JARVIS.exe" --browser-client --help
+      - name: Smoke test Linux/macOS bundle (no API token)
+        if: matrix.platform != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.platform }}" == "macos" ]]; then
+            EXECUTABLE="dist/JARVIS.app/Contents/MacOS/JARVIS"
+            test -r "dist/JARVIS.app/Contents/Info.plist"
+          else
+            EXECUTABLE="dist/JARVIS/JARVIS"
+            test -r "dist/JARVIS/_internal/jarvis_web.html"
+          fi
+          "$EXECUTABLE" --version
+          "$EXECUTABLE" --help
+          "$EXECUTABLE" --browser-client --help
+      - name: Assemble Linux .deb
+        if: matrix.platform == 'linux'
+        run: python packaging/linux/build_deb.py
+      - name: Inspect Linux package and embedded launcher
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          dpkg-deb --field dist/installers/*.deb
+          dpkg-deb --contents dist/installers/*.deb | grep 'opt/jarvis/JARVIS'
+          dpkg-deb --contents dist/installers/*.deb | grep 'usr/bin/jarvis'
+      - name: Assemble macOS .dmg
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: bash packaging/macos/build_dmg.sh
+      - name: Inspect macOS disk image
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: hdiutil imageinfo dist/installers/JARVIS-macOS.dmg
+      - name: Install Inno Setup compiler on Windows
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+      - name: Assemble Windows .exe installer
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $compiler = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path $compiler)) { throw "Inno Setup compiler missing: $compiler" }
+          & $compiler "packaging\windows\JARVIS.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+      - name: Upload native installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-${{ matrix.platform }}
+          path: dist/installers/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: native-builds
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: jarvis-*
+          merge-multiple: true
+          path: dist/release
+      - name: Publish versioned release installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/release/* --title "$GITHUB_REF_NAME" --generate-notes --verify-tag

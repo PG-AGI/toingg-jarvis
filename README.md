@@ -202,6 +202,8 @@ python3 jarvis_launcher.py
 
 ---
 
+**Native Windows/Linux/macOS installers:** see [the build and install guide](docs/native-installers.md).
+
 ## 🛠️ Installation
 
 ### 1. Clone the repository
