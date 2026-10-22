@@ -267,6 +267,59 @@ def _ensure_profile(slot):
         _slot_profiles[slot] = d
     return _slot_profiles[slot]
 
+def _browser_window_options(environ=None):
+    """Read optional placement configuration without changing source defaults.
+
+    JARVIS_WINDOW_SIZE=1600x900, JARVIS_WINDOW_POSITION=center|top-left|x,y,
+    JARVIS_WINDOW_MONITOR=active|primary. Invalid input is rejected at startup.
+    """
+    import re
+    env = os.environ if environ is None else environ
+    size = env.get("JARVIS_WINDOW_SIZE", "").strip()
+    position = env.get("JARVIS_WINDOW_POSITION", "grid").strip().lower()
+    monitor = env.get("JARVIS_WINDOW_MONITOR", "active").strip().lower()
+    if monitor not in ("active", "primary"):
+        raise ValueError("JARVIS_WINDOW_MONITOR must be active or primary")
+    if not size:
+        width, height = URL_WIN_W, URL_WIN_H
+    else:
+        m = re.fullmatch(r"([0-9]{2,4})x([0-9]{2,4})", size)
+        if not m:
+            raise ValueError("JARVIS_WINDOW_SIZE must be WIDTHxHEIGHT")
+        width, height = map(int, m.groups())
+        if not (320 <= width <= 4096 and 240 <= height <= 2160):
+            raise ValueError("JARVIS_WINDOW_SIZE outside 320..4096 x 240..2160")
+    if position not in ("grid", "center", "top-left") and not re.fullmatch(
+        r"-?[0-9]{1,5},-?[0-9]{1,5}", position
+    ):
+        raise ValueError("JARVIS_WINDOW_POSITION must be grid, center, top-left or X,Y")
+    return width, height, monitor, position
+
+
+def _configured_window_geometry(slot, options=None):
+    width, height, monitor, position = options or _browser_window_options()
+    screen = get_active_screen_bounds() if monitor == "active" else None
+    if screen is None:
+        sw, sh = get_screen_size()
+        screen = (0, 0, sw, sh)
+    sx, sy, sw, sh = screen
+    width, height = min(width, sw), min(height, sh)
+    if position == "center":
+        x, y = sx + (sw - width) // 2, sy + (sh - height) // 2
+    elif position == "top-left":
+        x, y = sx + _PADDING, sy + _PADDING
+    elif position == "grid":
+        col, row = slot % 2, slot // 2
+        x = sx + _PADDING + col * (width + _PADDING)
+        y = sy + _PADDING + row * (height + _PADDING)
+    else:
+        x, y = map(int, position.split(","))
+    # Clamp to the selected display; don't launch windows off-screen.
+    x = max(sx, min(x, sx + sw - width))
+    y = max(sy, min(y, sy + sh - height))
+    return width, height, x, y
+
+
 def _slot_pos(slot):
     """
     2×2 grid inset from screen edges:
@@ -327,8 +380,7 @@ def open_url_in_slot(url, slot, tab=None):
     if desktop_preview:
         win_w, win_h, x, y = _desktop_preview_geometry()
     else:
-        win_w, win_h = URL_WIN_W, URL_WIN_H
-        x, y = _slot_pos(slot)
+        win_w, win_h, x, y = _configured_window_geometry(slot)
     profile = _ensure_profile(slot)
 
     old = _url_slot_wins.get(slot)

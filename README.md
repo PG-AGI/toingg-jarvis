@@ -708,3 +708,29 @@ If you use JARVIS in research or reference it in a publication, please cite:
 *If this project helped you, please consider giving it a ⭐ — it means a lot!*
 
 </div>
+
+## Browser window placement
+
+Set optional environment variables before launching JARVIS to control how Chrome
+windows opened by the slot manager are placed. All options are validated:
+
+- JARVIS_WINDOW_SIZE: `WIDTHxHEIGHT` (e.g. `1600x900`), bounds 320–4096 x 240–2160.
+- JARVIS_WINDOW_POSITION: `grid` (default), `center`, `top-left`, or absolute `X,Y`.
+- JARVIS_WINDOW_MONITOR: `active` (default) or `primary`.
+
+Example on macOS/Linux:
+
+    JARVIS_WINDOW_SIZE=1200x720 JARVIS_WINDOW_POSITION=center python3 jarvis_launcher.py
+
+Example on Windows Command Prompt:
+
+    set JARVIS_WINDOW_SIZE=1200x720
+    set JARVIS_WINDOW_POSITION=center
+    python jarvis_launcher.py
+
+Out-of-screen positions are clamped to the selected screen. With no overrides,
+the launcher preserves its existing 860x580 four-slot grid.
+The `primary` selection uses the primary desktop bounds, whereas `active`
+tries to use the monitor containing the active app and falls back to the
+primary desktop bounds if the platform cannot determine a monitor.
+Desktop-preview mode intentionally continues to use its larger sizing rule.
