@@ -24,6 +24,7 @@ import base64
 
 import websocket
 from playwright.sync_api import sync_playwright, Page, Playwright
+from screenshot_uploader import resolve_screenshot_upload_url, upload_screenshot_bytes
 
 # playwright-stealth >= 2.x uses `Stealth`; older 1.x used `stealth_sync`.
 try:
@@ -1030,6 +1031,16 @@ class BrowserClient:
                 return {"success": True, "result": content}
 
             elif action == "screenshot":
+                upload_url = resolve_screenshot_upload_url(params)
+                if upload_url:
+                    img_bytes = page.screenshot(full_page=params.get("full_page", False))
+                    filename = str(params.get("filename") or "screenshot.png")
+                    up_res = upload_screenshot_bytes(img_bytes, upload_url, filename=filename)
+                    return {
+                        "success": bool(up_res.get("ok", True)),
+                        "result": f"Screenshot uploaded to {upload_url} ({len(img_bytes)} bytes)",
+                        "upload": up_res,
+                    }
                 path = params.get("path")
                 if path:
                     page.screenshot(path=path, full_page=params.get("full_page", False))

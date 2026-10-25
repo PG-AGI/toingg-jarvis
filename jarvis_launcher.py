@@ -19,6 +19,12 @@ import platform as _plat
 from datetime import datetime, timedelta, timezone
 
 from native_file_manager import NativeFileActionError, handle_file_action_payload
+from screenshot_uploader import (
+    ScreenshotUploadError,
+    receive_multipart_screenshot,
+    resolve_screenshot_upload_url,
+    upload_screenshot_bytes,
+)
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 _DIR        = os.path.dirname(os.path.abspath(__file__))
@@ -593,6 +599,12 @@ def execute_playwright_tool_action(payload):
         return {"action": action, "selector": selector}
 
     if action == "screenshot":
+        upload_url = resolve_screenshot_upload_url(payload, config_path=os.path.join(_DIR, "config.json"))
+        if upload_url:
+            img_bytes = page.screenshot(full_page=bool(payload.get("full_page", True)))
+            filename = str(payload.get("filename") or "screenshot.png")
+            up_res = upload_screenshot_bytes(img_bytes, upload_url, filename=filename)
+            return {"action": action, "uploaded": True, **up_res}
         path = str(payload.get("path") or os.path.join(tempfile.gettempdir(), "jarvis-playwright.png"))
         page.screenshot(path=path, full_page=bool(payload.get("full_page", True)))
         return {"action": action, "path": path}
@@ -892,6 +904,22 @@ def start_http_server():
                     self.wfile.write(json.dumps(response).encode())
                 except (NativeFileActionError, json.JSONDecodeError) as e:
                     print(f"  [file] action error: {e}")
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+
+            elif self.path == "/upload":
+                try:
+                    ctype = self.headers.get("Content-Type", "")
+                    saved = receive_multipart_screenshot(body, ctype)
+                    self.send_response(201)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps(saved).encode())
+                except (ScreenshotUploadError, ValueError) as e:
                     self.send_response(400)
                     self.send_header("Content-Type", "application/json")
                     self._cors()
