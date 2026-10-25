@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 from native_file_manager import NativeFileActionError, handle_file_action_payload
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
-_DIR        = os.path.dirname(os.path.abspath(__file__))
+_DIR        = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 WEB_HTML    = os.path.join(_DIR, "jarvis_web.html")
 VISUAL_HTML = os.path.join(_DIR, "jarvis_visual.html")
 BROWSER_CLIENT = os.path.join(_DIR, "browserClient.py")

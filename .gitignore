@@ -213,3 +213,17 @@ __marimo__/
 # Local config (contains secrets)
 config.json
 jarvis_terminal.py
+
+# Packaging & Native Installers
+build/
+dist/
+*.deb
+*.dmg
+*.exe
+
+# Packaging & Native Installers
+build/
+dist/
+*.deb
+*.dmg
+*.exe
