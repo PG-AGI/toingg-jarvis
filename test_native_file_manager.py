@@ -85,6 +85,20 @@ class NativeFileManagerTests(unittest.TestCase):
         with self.assertRaises(NativeFileActionError):
             handle_file_action_payload([])
 
+    def test_validation_rejects_unhashable_and_non_string_actions(self):
+        for invalid_action in (["open_file"], {"action": "open_file"}, {"open_file"}, 123, True, None):
+            with self.subTest(action=invalid_action):
+                with self.assertRaises(NativeFileActionError):
+                    plan_file_action(invalid_action, str(self.file_path))
+                with self.assertRaises(NativeFileActionError):
+                    handle_file_action_payload(
+                        {
+                            "action": invalid_action,
+                            "path": str(self.file_path),
+                            "dry_run": True,
+                        }
+                    )
+
 
 if __name__ == "__main__":
     unittest.main()
