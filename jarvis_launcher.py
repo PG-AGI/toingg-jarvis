@@ -19,6 +19,14 @@ import platform as _plat
 from datetime import datetime, timedelta, timezone
 
 from native_file_manager import NativeFileActionError, handle_file_action_payload
+from multipart_upload_manager import (
+    MultipartUploadError,
+    cleanup_uploaded_token,
+    get_uploaded_file_metadata,
+    parse_multipart_form_data,
+    resolve_input_files,
+    store_uploaded_bytes,
+)
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 _DIR        = os.path.dirname(os.path.abspath(__file__))
@@ -611,6 +619,22 @@ def execute_playwright_tool_action(payload):
         page.wait_for_timeout(int(payload.get("timeout", 1000)))
         return {"action": action}
 
+    if action in ("input_file", "set_input_files", "upload_file"):
+        selector = str(payload.get("selector") or "input[type='file']").strip()
+        upload_dir = payload.get("upload_dir")
+        resolved_paths, cleanup_tokens = resolve_input_files(payload, upload_dir=upload_dir)
+        try:
+            page.set_input_files(selector, resolved_paths, timeout=timeout)
+        finally:
+            if not payload.get("keep_file", False):
+                for tok in cleanup_tokens:
+                    cleanup_uploaded_token(tok, upload_dir=upload_dir)
+        return {
+            "action": action,
+            "selector": selector,
+            "files": [os.path.basename(p) for p in resolved_paths],
+        }
+
     raise ValueError(f"unsupported playwright action: {action}")
 
 def execute_playwright_tool_actions(actions):
@@ -892,6 +916,28 @@ def start_http_server():
                     self.wfile.write(json.dumps(response).encode())
                 except (NativeFileActionError, json.JSONDecodeError) as e:
                     print(f"  [file] action error: {e}")
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+
+            elif self.path in ("/api/uploads", "/upload_file"):
+                try:
+                    ctype = self.headers.get("Content-Type", "")
+                    if "multipart/form-data" in ctype.lower():
+                        upload_res = parse_multipart_form_data(body, ctype)
+                    else:
+                        payload = json.loads(body) if body else {}
+                        paths, tokens = resolve_input_files(payload)
+                        meta = get_uploaded_file_metadata(tokens[0]) if tokens else {"path": paths[0], "filename": os.path.basename(paths[0])}
+                        upload_res = {"ok": True, **meta}
+                    self.send_response(201)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps(upload_res).encode())
+                except (MultipartUploadError, ValueError, json.JSONDecodeError) as e:
                     self.send_response(400)
                     self.send_header("Content-Type", "application/json")
                     self._cors()

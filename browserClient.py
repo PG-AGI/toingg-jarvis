@@ -24,6 +24,7 @@ import base64
 
 import websocket
 from playwright.sync_api import sync_playwright, Page, Playwright
+from multipart_upload_manager import cleanup_uploaded_token, resolve_input_files
 
 # playwright-stealth >= 2.x uses `Stealth`; older 1.x used `stealth_sync`.
 try:
@@ -1063,6 +1064,25 @@ class BrowserClient:
                 self._human_delay()
                 page.select_option(selector, value)
                 return {"success": True, "result": f"Selected '{value}' in '{selector}'"}
+
+            elif action in ("input_file", "set_input_files", "upload_file"):
+                selector = str(params.get("selector") or "input[type='file']").strip()
+                timeout = int(params.get("timeout", 30000))
+                upload_dir = params.get("upload_dir")
+                resolved_paths, cleanup_tokens = resolve_input_files(params, upload_dir=upload_dir)
+                self._human_delay(80, 250)
+                try:
+                    page.set_input_files(selector, resolved_paths, timeout=timeout)
+                finally:
+                    if not params.get("keep_file", False):
+                        for tok in cleanup_tokens:
+                            cleanup_uploaded_token(tok, upload_dir=upload_dir)
+                names = [os.path.basename(p) for p in resolved_paths]
+                return {
+                    "success": True,
+                    "result": f"Uploaded {len(resolved_paths)} file(s) ({', '.join(names)}) to '{selector}'",
+                    "files": names,
+                }
 
             elif action == "scroll":
                 x = params.get("x", 0)
