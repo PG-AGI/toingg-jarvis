@@ -19,6 +19,13 @@ import platform as _plat
 from datetime import datetime, timedelta, timezone
 
 from native_file_manager import NativeFileActionError, handle_file_action_payload
+from browser_window_config import (
+    BrowserWindowConfigError,
+    build_launcher_arg_parser,
+    compute_window_geometry,
+    enumerate_monitors,
+    load_browser_window_config,
+)
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 _DIR        = os.path.dirname(os.path.abspath(__file__))
@@ -43,6 +50,40 @@ _url_slot      = 0
 _url_slot_wins = {}
 _url_slot_modes = {}
 _slot_profiles = {}
+_browser_window_cfg = load_browser_window_config(config_path=os.path.join(_DIR, "config.json"))
+
+def get_browser_window_config():
+    return dict(_browser_window_cfg)
+
+def update_browser_window_config(overrides, persist=True):
+    global _browser_window_cfg
+    merged = dict(_browser_window_cfg)
+    if isinstance(overrides, dict):
+        merged.update({k: v for k, v in overrides.items() if v is not None})
+    cfg_path = os.path.join(_DIR, "config.json")
+    _browser_window_cfg = load_browser_window_config(
+        config_path=cfg_path,
+        cli_args={
+            "preferred_monitor": merged.get("preferred_monitor"),
+            "window_size": merged.get("window_size"),
+            "position": merged.get("position"),
+        },
+        environ={},
+    )
+    if persist:
+        try:
+            with open(cfg_path, "r") as f:
+                raw = json.load(f)
+        except Exception:
+            raw = {}
+        raw["browser"] = {
+            "preferred_monitor": _browser_window_cfg["preferred_monitor"],
+            "window_size": _browser_window_cfg["window_size"],
+            "position": _browser_window_cfg["position"],
+        }
+        with open(cfg_path, "w") as f:
+            json.dump(raw, f, indent=2)
+    return dict(_browser_window_cfg)
 
 # ── APP REGISTRY ──────────────────────────────────────────────────────────────
 _IS_MAC = _plat.system() == "Darwin"
@@ -327,8 +368,15 @@ def open_url_in_slot(url, slot, tab=None):
     if desktop_preview:
         win_w, win_h, x, y = _desktop_preview_geometry()
     else:
-        win_w, win_h = URL_WIN_W, URL_WIN_H
-        x, y = _slot_pos(slot)
+        win_w, win_h, x, y = compute_window_geometry(
+            _browser_window_cfg,
+            slot=slot,
+            tab=tab if isinstance(tab, dict) else None,
+            monitors=enumerate_monitors() or None,
+            active_screen_bounds=get_active_screen_bounds(),
+            fallback_screen_size=get_screen_size(),
+            padding=_PADDING,
+        )
     profile = _ensure_profile(slot)
 
     old = _url_slot_wins.get(slot)
@@ -786,6 +834,13 @@ def start_http_server():
                 self._cors()
                 self.end_headers()
                 self.wfile.write(data)
+            elif self.path == "/browser_config":
+                data = json.dumps({"ok": True, "browser": get_browser_window_config()}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self._cors()
+                self.end_headers()
+                self.wfile.write(data)
             else:
                 self.send_response(404); self.end_headers()
 
@@ -946,6 +1001,22 @@ def start_http_server():
                 except Exception as e:
                     print(f"  [file] unexpected error: {e}")
                     self.send_response(500)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+
+            elif self.path == "/browser_config":
+                try:
+                    payload = json.loads(body) if body else {}
+                    updated = update_browser_window_config(payload, persist=bool(payload.get("persist", True)))
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": True, "browser": updated}).encode())
+                except (BrowserWindowConfigError, ValueError, json.JSONDecodeError) as e:
+                    self.send_response(400)
                     self.send_header("Content-Type", "application/json")
                     self._cors()
                     self.end_headers()
@@ -1323,7 +1394,14 @@ def check_api_key():
             print("  ⚠   Invalid choice. Enter 1, 2, 3, Q, or paste your API key.\n", flush=True)
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
-def main():
+def main(argv=None):
+    global _browser_window_cfg
+    parser = build_launcher_arg_parser()
+    cli_ns, _ = parser.parse_known_args(argv)
+    _browser_window_cfg = load_browser_window_config(
+        config_path=os.path.join(_DIR, "config.json"),
+        cli_args=vars(cli_ns),
+    )
     print("""
   ╔══════════════════════════════════════════╗
   ║   W E E S T R E A M  //  J A R V I S    ║
