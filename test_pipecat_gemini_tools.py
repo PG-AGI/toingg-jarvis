@@ -1,6 +1,7 @@
 import unittest
 
 from pipecat_gemini_tools import (
+    LauncherToolFrameProcessor,
     LocalFunctionCallResultFrame,
     build_tools_schema,
     call_launcher_tool,
@@ -8,6 +9,7 @@ from pipecat_gemini_tools import (
     handle_function_call_params,
     handle_function_call_frame,
     register_launcher_tools,
+    resolve_backend_config,
 )
 
 
@@ -47,6 +49,15 @@ class FakeLLMService:
 
 
 class PipecatGeminiToolBridgeTest(unittest.IsolatedAsyncioTestCase):
+    def test_resolve_backend_config_defaults_to_toingg(self):
+        cfg = resolve_backend_config({})
+        self.assertEqual(cfg["BACKEND"], "toingg")
+
+    def test_resolve_backend_config_switches_to_pipecat_gemini(self):
+        cfg = resolve_backend_config({"BACKEND": "pipecat_gemini"})
+        self.assertEqual(cfg["BACKEND"], "pipecat_gemini")
+        self.assertEqual(cfg["PIPECAT_WS_URL"], "ws://localhost:8765")
+
     def test_extracts_function_call_frame_fields(self):
         call = extract_function_call(DummyFunctionCallFrame())
 
@@ -150,6 +161,24 @@ class PipecatGeminiToolBridgeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(params.results, [result])
         self.assertEqual(calls[0][0], "http://localhost:8766/close_tabs")
         self.assertEqual(calls[0][1]["auto"], True)
+
+    async def test_launcher_tool_frame_processor_catches_frame_and_emits_result(self):
+        calls = []
+
+        def fake_post(url, payload):
+            calls.append((url, payload))
+            return {"ok": True, "status": 200, "data": {"opened": True}}
+
+        processor = LauncherToolFrameProcessor(
+            launcher_url="http://localhost:8766",
+            http_post=fake_post,
+        )
+        out_frame = await processor.process_frame(DummyFunctionCallFrame())
+
+        self.assertIsInstance(out_frame, LocalFunctionCallResultFrame)
+        self.assertEqual(out_frame.function_name, "open_browser")
+        self.assertEqual(len(processor.emitted_frames), 1)
+        self.assertEqual(calls[0][0], "http://localhost:8766/open_window")
 
 
 if __name__ == "__main__":

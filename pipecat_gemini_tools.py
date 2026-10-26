@@ -17,6 +17,21 @@ from urllib.error import HTTPError, URLError
 
 
 DEFAULT_LAUNCHER_URL = "http://localhost:8766"
+DEFAULT_BACKEND = "toingg"
+PIPECAT_GEMINI_BACKEND = "pipecat_gemini"
+DEFAULT_PIPECAT_WS_URL = "ws://localhost:8765"
+
+
+def resolve_backend_config(cfg: dict[str, Any] | None) -> dict[str, Any]:
+    """Normalize backend selection from config.json while keeping 'toingg' as default."""
+    raw = dict(cfg or {})
+    backend = str(raw.get("BACKEND") or DEFAULT_BACKEND).strip().lower()
+    if backend not in (DEFAULT_BACKEND, PIPECAT_GEMINI_BACKEND):
+        backend = DEFAULT_BACKEND
+    raw["BACKEND"] = backend
+    if backend == PIPECAT_GEMINI_BACKEND:
+        raw.setdefault("PIPECAT_WS_URL", DEFAULT_PIPECAT_WS_URL)
+    return raw
 
 
 TOOL_DEFINITIONS = [
@@ -340,3 +355,53 @@ def register_launcher_tools(
         )
         registered.append(name)
     return registered
+
+
+def is_function_call_frame(frame: Any) -> bool:
+    """Return True if frame is a Pipecat FunctionCallFrame or equivalent tool-call frame."""
+    cls_name = frame.__class__.__name__ if frame is not None else ""
+    if cls_name in ("FunctionCallFrame", "FunctionCallInProgressFrame"):
+        return True
+    return bool(
+        _first_attr(frame, "function_name", "tool_name")
+        and _first_attr(frame, "arguments", "args", "function_args") is not None
+    )
+
+
+class LauncherToolFrameProcessor:
+    """Pipecat pipeline frame processor that intercepts FunctionCallFrame,
+    invokes the corresponding localhost:8766 launcher endpoint, and pushes a
+    FunctionCallResultFrame downstream so Gemini can verbally confirm the action.
+    """
+
+    def __init__(
+        self,
+        launcher_url: str = DEFAULT_LAUNCHER_URL,
+        http_post: Callable[[str, dict[str, Any]], dict[str, Any]] = post_json,
+        push_frame_fn: Callable[[Any, Any], Any] | None = None,
+    ) -> None:
+        self.launcher_url = launcher_url
+        self.http_post = http_post
+        self._push_frame_fn = push_frame_fn
+        self.emitted_frames: list[Any] = []
+
+    async def push_frame(self, frame: Any, direction: Any = None) -> None:
+        self.emitted_frames.append(frame)
+        if self._push_frame_fn is not None:
+            res = self._push_frame_fn(frame, direction)
+            if hasattr(res, "__await__"):
+                await res
+
+    async def process_frame(self, frame: Any, direction: Any = None) -> Any:
+        if is_function_call_frame(frame):
+            result_frame = await asyncio.to_thread(
+                handle_function_call_frame,
+                frame,
+                self.launcher_url,
+                self.http_post,
+            )
+            await self.push_frame(result_frame, direction)
+            return result_frame
+
+        await self.push_frame(frame, direction)
+        return frame

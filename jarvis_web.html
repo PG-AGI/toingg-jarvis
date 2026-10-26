@@ -1607,13 +1607,21 @@ async function setupSave() {
   }
 }
 
+let BACKEND = "toingg";
 async function loadConfig() {
   const res = await fetch("config.json");
   if (!res.ok) throw new Error(`config.json not found (${res.status})`);
   const cfg = await res.json();
-  WS_URL  = cfg.WS_URL  || "";
-  TOKEN   = cfg.TOKEN   || "";
-  CAMP_ID = cfg.CAMP_ID || "";
+  BACKEND = (cfg.BACKEND || "toingg").toLowerCase();
+  if (BACKEND === "pipecat_gemini") {
+    WS_URL  = cfg.PIPECAT_WS_URL || "ws://localhost:8765";
+    TOKEN   = cfg.GEMINI_API_KEY || cfg.TOKEN || "pipecat_gemini_session";
+    CAMP_ID = cfg.CAMP_ID || "pipecat_gemini";
+  } else {
+    WS_URL  = cfg.WS_URL  || "";
+    TOKEN   = cfg.TOKEN   || "";
+    CAMP_ID = cfg.CAMP_ID || "";
+  }
 }
 
 async function boot() {

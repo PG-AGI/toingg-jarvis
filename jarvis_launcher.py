@@ -19,6 +19,7 @@ import platform as _plat
 from datetime import datetime, timedelta, timezone
 
 from native_file_manager import NativeFileActionError, handle_file_action_payload
+from pipecat_gemini_tools import resolve_backend_config
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 _DIR        = os.path.dirname(os.path.abspath(__file__))
@@ -1218,13 +1219,19 @@ def _is_valid_token(token):
     token = token.strip() if token else ""
     return len(token) >= 20 and token.lower() not in _PLACEHOLDER_TOKENS
 
-def _load_token():
+def _load_config():
     cfg_path = os.path.join(_DIR, "config.json")
     try:
         with open(cfg_path, "r") as f:
-            return json.load(f).get("TOKEN", "").strip()
+            return resolve_backend_config(json.load(f))
     except Exception:
-        return ""
+        return resolve_backend_config({})
+
+def _load_token():
+    cfg = _load_config()
+    if cfg.get("BACKEND") == "pipecat_gemini":
+        return (cfg.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY") or "pipecat_gemini_configured_token").strip()
+    return cfg.get("TOKEN", "").strip()
 
 def _save_token(token):
     cfg_path = os.path.join(_DIR, "config.json")
