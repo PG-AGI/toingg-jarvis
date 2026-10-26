@@ -1,0 +1,104 @@
+name: Build Cross-Platform Installers
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 2.0.0)"
+        required: false
+        default: "2.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  test-packaging:
+    name: Verify Packaging Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run packaging unit tests
+        run: python -m unittest test_packaging.py -v
+
+  build-installers:
+    name: Build (${{ matrix.target }})
+    needs: test-packaging
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows
+            artifact_glob: "dist/JARVIS-Setup-*-Windows-x64.exe"
+          - os: macos-latest
+            target: macos
+            artifact_glob: "dist/JARVIS-*-macOS.dmg"
+          - os: ubuntu-latest
+            target: linux
+            artifact_glob: "dist/jarvis_*_amd64.deb"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system audio dependencies (Linux)
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y portaudio19-dev libportaudio2 dpkg-dev
+
+      - name: Install system audio dependencies (macOS)
+        if: matrix.target == 'macos'
+        run: brew install portaudio
+
+      - name: Install Python build & runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller numpy websocket-client rich SpeechRecognition playwright playwright-stealth
+          python -m pip install pyaudio || true
+
+      - name: Resolve version string
+        id: meta
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VER="${GITHUB_REF_NAME#v}"
+          elif [[ -n "${{ github.event.inputs.version }}" ]]; then
+            VER="${{ github.event.inputs.version }}"
+          else
+            VER="2.0.0"
+          fi
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+
+      - name: Build standalone package & native installer
+        run: |
+          python packaging/build_package.py --platform ${{ matrix.target }} --installer --version ${{ steps.meta.outputs.version }}
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-${{ matrix.target }}-installer
+          path: ${{ matrix.artifact_glob }}
+          if-no-files-found: error
+
+      - name: Publish to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.artifact_glob }}
