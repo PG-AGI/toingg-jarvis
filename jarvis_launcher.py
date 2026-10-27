@@ -21,10 +21,45 @@ from datetime import datetime, timedelta, timezone
 from native_file_manager import NativeFileActionError, handle_file_action_payload
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
-_DIR        = os.path.dirname(os.path.abspath(__file__))
-WEB_HTML    = os.path.join(_DIR, "jarvis_web.html")
-VISUAL_HTML = os.path.join(_DIR, "jarvis_visual.html")
-BROWSER_CLIENT = os.path.join(_DIR, "browserClient.py")
+APP_NAME    = "Toingg JARVIS"
+
+def _resource_dir():
+    """Bundled read-only files: next to this script, or PyInstaller's unpack dir."""
+    return getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+
+def _user_data_dir(system=None, environ=None, frozen=None):
+    """Writable dir for config.json and the browser profile.
+
+    Running from source keeps everything next to the script, as before. An
+    installed build lives in a read-only location, so it uses a per-user dir.
+    """
+    frozen = getattr(sys, "frozen", False) if frozen is None else frozen
+    if not frozen:
+        return os.path.dirname(os.path.abspath(__file__))
+    system = system or _plat.system()
+    environ = os.environ if environ is None else environ
+    home = os.path.expanduser("~")
+    if system == "Windows":
+        return os.path.join(environ.get("APPDATA") or home, APP_NAME)
+    if system == "Darwin":
+        return os.path.join(home, "Library", "Application Support", APP_NAME)
+    return os.path.join(environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config"), "toingg-jarvis")
+
+def _app_version(res_dir, default="2.0.0"):
+    """Installed builds bundle a VERSION file (see installers/build.py)."""
+    try:
+        with open(os.path.join(res_dir, "VERSION"), "r") as f:
+            return f.read().strip() or default
+    except OSError:
+        return default
+
+_RES_DIR    = _resource_dir()
+APP_VERSION = _app_version(_RES_DIR)
+_DIR        = _user_data_dir()
+CONFIG_PATH = os.path.join(_DIR, "config.json")
+WEB_HTML    = os.path.join(_RES_DIR, "jarvis_web.html")
+VISUAL_HTML = os.path.join(_RES_DIR, "jarvis_visual.html")
+BROWSER_CLIENT = os.path.join(_RES_DIR, "browserClient.py")
 WAKE_WORDS  = ["hey jarvis", "jarvis", "hey jervis", "hey davis"]
 LAUNCH_COOLDOWN = 4.0
 HTTP_PORT   = 8766
@@ -554,6 +589,7 @@ def _get_playwright_tool_page(headless=True):
     if page and not page.is_closed():
         return page
 
+    ensure_playwright_chromium()
     pw = sync_playwright().start()
     browser = pw.chromium.launch(headless=headless)
     page = browser.new_page()
@@ -622,16 +658,50 @@ _visual_proc = None
 _web_proc    = None
 _browser_client_proc = None
 
+def browser_client_command(frozen=None):
+    """An installed build has no separate Python, so it re-runs itself."""
+    frozen = getattr(sys, "frozen", False) if frozen is None else frozen
+    if frozen:
+        return [sys.executable, "--browser-client"]
+    return [sys.executable, BROWSER_CLIENT]
+
+def configure_playwright_browsers_path(environ=None, frozen=None):
+    """Point Playwright at a writable per-user browser dir in an installed build.
+
+    When frozen, Playwright defaults PLAYWRIGHT_BROWSERS_PATH to "0", i.e. inside
+    the read-only bundle, so the install below and the launch would disagree.
+    """
+    frozen = getattr(sys, "frozen", False) if frozen is None else frozen
+    environ = os.environ if environ is None else environ
+    if frozen:
+        environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", os.path.join(_DIR, "ms-playwright"))
+    return environ.get("PLAYWRIGHT_BROWSERS_PATH")
+
+def ensure_playwright_chromium():
+    """Download Playwright's Chromium on first use of an installed build."""
+    if not getattr(sys, "frozen", False):
+        return
+    browsers_path = configure_playwright_browsers_path()
+    try:
+        from playwright._impl._driver import compute_driver_executable, get_driver_env
+        driver = compute_driver_executable()
+        cmd = list(driver) if isinstance(driver, (tuple, list)) else [str(driver)]
+        env = dict(get_driver_env(), PLAYWRIGHT_BROWSERS_PATH=browsers_path)
+        subprocess.run(cmd + ["install", "chromium"], env=env, check=False)
+    except Exception as e:
+        print(f"  [browser] ⚠  Could not install Chromium for Playwright: {e}")
+
 def start_browser_client():
     """Start browserClient.py in the background for browser automation."""
     global _browser_client_proc
     if _browser_client_proc and _browser_client_proc.poll() is None:
         print("  [browser] already running"); return
-    if not os.path.exists(BROWSER_CLIENT):
+    if not getattr(sys, "frozen", False) and not os.path.exists(BROWSER_CLIENT):
         print("  [browser] ⚠  browserClient.py not found"); return
 
     try:
-        _browser_client_proc = subprocess.Popen([sys.executable, BROWSER_CLIENT], cwd=_DIR)
+        os.makedirs(_DIR, exist_ok=True)
+        _browser_client_proc = subprocess.Popen(browser_client_command(), cwd=_DIR)
         print("  [browser] ✅ browserClient.py started")
     except Exception as e:
         print(f"  [browser] ⚠  Failed to start browserClient.py: {e}")
@@ -770,7 +840,7 @@ def start_http_server():
             elif self.path in ("/visual", "/visual.html"):
                 self._serve_file(VISUAL_HTML)
             elif self.path == "/config.json":
-                self._serve_file(os.path.join(_DIR, "config.json"), "application/json")
+                self._serve_file(CONFIG_PATH, "application/json")
             elif self.path == "/state":
                 with _http_state_lock:
                     data = json.dumps(_http_state).encode()
@@ -957,13 +1027,14 @@ def start_http_server():
                     token = payload.get("token", "").strip()
                     if not token:
                         raise ValueError("token is empty")
-                    cfg_path = os.path.join(_DIR, "config.json")
+                    cfg_path = CONFIG_PATH
                     try:
                         with open(cfg_path, "r") as f:
                             cfg = json.load(f)
                     except Exception:
                         cfg = {}
                     cfg["TOKEN"] = token
+                    os.makedirs(_DIR, exist_ok=True)
                     with open(cfg_path, "w") as f:
                         json.dump(cfg, f, indent=2)
                     print(f"  [config] ✅ API key updated")
@@ -1219,7 +1290,7 @@ def _is_valid_token(token):
     return len(token) >= 20 and token.lower() not in _PLACEHOLDER_TOKENS
 
 def _load_token():
-    cfg_path = os.path.join(_DIR, "config.json")
+    cfg_path = CONFIG_PATH
     try:
         with open(cfg_path, "r") as f:
             return json.load(f).get("TOKEN", "").strip()
@@ -1227,13 +1298,14 @@ def _load_token():
         return ""
 
 def _save_token(token):
-    cfg_path = os.path.join(_DIR, "config.json")
+    cfg_path = CONFIG_PATH
     try:
         with open(cfg_path, "r") as f:
             cfg = json.load(f)
     except Exception:
         cfg = {}
     cfg["TOKEN"] = token
+    os.makedirs(_DIR, exist_ok=True)
     with open(cfg_path, "w") as f:
         json.dump(cfg, f, indent=2)
 
@@ -1356,5 +1428,20 @@ def main():
     except KeyboardInterrupt:
         print("\n  Stopped.")
 
-if __name__ == "__main__":
+def run(argv=None):
+    """Entry point, also used by installed builds (see installers/build.py)."""
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if "--version" in argv:
+        print(f"{APP_NAME} {APP_VERSION}")
+        return
+    configure_playwright_browsers_path()
+    if argv[:1] == ["--browser-client"]:
+        ensure_playwright_chromium()
+        import browserClient
+        sys.argv = [sys.argv[0]] + argv[1:]
+        browserClient.main()
+        return
     main()
+
+if __name__ == "__main__":
+    run()

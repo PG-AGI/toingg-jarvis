@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Toingg JARVIS
+Comment=AI voice terminal powered by Toingg
+Exec=toingg-jarvis
+Terminal=true
+Categories=Utility;AudioVideo;
+Keywords=jarvis;voice;assistant;toingg;

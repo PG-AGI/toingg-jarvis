@@ -61,6 +61,7 @@
 - [✨ Features](#-features)
 - [📋 Prerequisites](#-prerequisites)
 - [🚀 Quick Start](#-quick-start)
+- [📦 Native Installers](#-native-installers)
 - [🛠️ Installation](#️-installation)
 - [⚙️ Environment Setup](#️-environment-setup)
 - [💻 Running JARVIS](#-running-jarvis)
@@ -199,6 +200,35 @@ python3 jarvis_launcher.py
 ```
 
 > 💡 No API key yet? The launcher will walk you through getting one interactively.
+
+---
+
+## 📦 Native Installers
+
+Don't want to set up Python? Download the installer for your OS from the
+[Releases page](https://github.com/PG-AGI/toingg-jarvis/releases). Each one bundles Python and every dependency.
+
+| OS | File | Install |
+|----|------|---------|
+| Windows 10/11 (64-bit) | `toingg-jarvis-<version>-windows-x64-setup.exe` | Run it, then start **Toingg JARVIS** from the Start menu |
+| Debian / Ubuntu | `toingg-jarvis_<version>_amd64.deb` | `sudo apt install ./toingg-jarvis_<version>_amd64.deb`, then run `toingg-jarvis` or use the app menu |
+| macOS 10.15+ | `toingg-jarvis-<version>-macos-arm64.dmg` | Open it, drag **Toingg JARVIS** to Applications |
+
+- Installing a newer version upgrades the existing one in place. `SHA256SUMS.txt` on each release lets you verify the downloads.
+- Installed builds keep `config.json` and the browser profile in a per-user folder: `%APPDATA%\Toingg JARVIS` (Windows), `~/Library/Application Support/Toingg JARVIS` (macOS) or `~/.config/toingg-jarvis` (Linux). The launcher asks for your API key on first run.
+- Browser automation downloads Playwright's Chromium the first time it runs.
+- Unsigned builds: Windows SmartScreen may warn ("More info → Run anyway"), and on macOS right-click the app and choose **Open** the first time.
+
+### Building the installers
+
+`installers/build.py` freezes the launcher with PyInstaller and packages it for the OS it runs on (Inno Setup on Windows, `dpkg-deb` on Linux, `hdiutil` on macOS):
+
+```bash
+pip install -r installers/requirements.txt
+python installers/build.py --version 2.1.0   # output goes to dist/
+```
+
+The [Release workflow](.github/workflows/release.yml) builds all three on GitHub Actions. Pushing a tag such as `v2.1.0` publishes a release with the installers attached; tags with a suffix such as `v2.1.0-rc1` become prereleases. Signing is turned on by adding the repository secrets listed at the top of the workflow.
 
 ---
 
@@ -458,6 +488,7 @@ toingg-jarvis/
 ├── 🖥️  JARVIS.bat              # Windows auto-installer & launcher
 ├── 🍎 JARVIS.command          # macOS auto-installer & launcher
 ├── 🔧 setup_mac.sh            # macOS one-time permission fixer
+├── 📦 installers/             # Native installer build (build.py, Inno Setup script, .desktop entry)
 ├── 📄 config.json             # API credentials (create from example, not committed)
 └── 📄 config.example.json     # Config template
 ```

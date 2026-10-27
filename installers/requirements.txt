@@ -1,0 +1,11 @@
+# Everything an installed build bundles, plus the tools that build it.
+# Used by installers/build.py and .github/workflows/release.yml.
+pyinstaller>=6.10
+pyaudio
+numpy
+websocket-client
+rich
+SpeechRecognition
+playwright
+playwright-stealth
+pyobjc-framework-Cocoa; sys_platform == "darwin"
