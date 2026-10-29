@@ -1,0 +1,29 @@
+name: Build Cross-Platform Installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+    paths:
+      - 'cross_platform_packager.py'
+      - 'test_cross_platform_packager.py'
+      - 'jarvis_launcher.py'
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run Packaging & Unit Tests
+        run: python -m unittest discover -p "test_*.py" -v
+      - name: Verify Dry-Run Packaging Plan
+        run: python -c "from cross_platform_packager import handle_package_payload; print(handle_package_payload({'dry_run': True}))"

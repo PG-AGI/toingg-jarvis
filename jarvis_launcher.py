@@ -14,7 +14,9 @@ Requirements:
 
 import os, sys, time, threading, subprocess, tempfile, json, webbrowser
 import uuid
-import ctypes, ctypes.wintypes
+import ctypes
+if sys.platform == "win32":
+    import ctypes.wintypes
 import platform as _plat
 from datetime import datetime, timedelta, timezone
 
