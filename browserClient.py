@@ -24,6 +24,7 @@ import base64
 
 import websocket
 from playwright.sync_api import sync_playwright, Page, Playwright
+from window_config import WindowConfig
 
 # playwright-stealth >= 2.x uses `Stealth`; older 1.x used `stealth_sync`.
 try:
@@ -95,10 +96,22 @@ STEALTH_INIT_SCRIPT = """
 
 
 class BrowserClient:
-    def __init__(self, ws_url: str, headless: bool = False, user_data_dir: str | None = None):
+    def __init__(
+        self,
+        ws_url: str,
+        headless: bool = False,
+        user_data_dir: str | None = None,
+        window_size: str | None = None,
+        position: str | None = None,
+        monitor: str | None = None,
+    ):
         self.ws_url = ws_url
         self.headless = headless
         self.user_data_dir = os.path.expanduser(user_data_dir or ".browser-profile")
+        self.window_size = window_size
+        self.position = position
+        self.monitor = monitor
+        self.window_config = WindowConfig(window_size=window_size, position=position, monitor=monitor)
         self.ws: websocket.WebSocketApp | None = None
         self.page: Page | None = None
         self.playwright: Playwright | None = None
@@ -1261,21 +1274,22 @@ class BrowserClient:
     def run(self):
         with sync_playwright() as pw:
             self.playwright = pw
+            win_args = self.window_config.get_chromium_args()
+            viewport = self.window_config.get_viewport()
+            args = [
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+            ] + win_args
             context = pw.chromium.launch_persistent_context(
                 user_data_dir=self.user_data_dir,
                 headless=self.headless,
-                args=[
-                    "--no-sandbox",
-                    "--disable-dev-shm-usage",
-                    # NOTE: --disable-blink-features=AutomationControlled is intentionally
-                    # omitted — the flag itself is a bot signal; stealth patches handle this.
-                ],
+                args=args,
                 user_agent=(
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
                     "Chrome/124.0.0.0 Safari/537.36"
                 ),
-                viewport={"width": 1366, "height": 768},
+                viewport=viewport,
                 locale="en-US",
                 timezone_id="America/New_York",
                 color_scheme="light",
@@ -1329,9 +1343,31 @@ def main():
         default=".browser-profile",
         help="Persistent browser profile directory for cookies and login sessions",
     )
+    parser.add_argument(
+        "--window-size",
+        default=None,
+        help="Browser window size (e.g. 1600x900 or 1920x1080)",
+    )
+    parser.add_argument(
+        "--position",
+        default=None,
+        help="Window positioning (e.g. center, top-left, top-right, x=1920,y=0)",
+    )
+    parser.add_argument(
+        "--monitor",
+        default="primary",
+        help="Target monitor (e.g. primary, active, monitor-1, monitor-2)",
+    )
     args = parser.parse_args()
 
-    client = BrowserClient(ws_url=args.url, headless=args.headless, user_data_dir=args.user_data_dir)
+    client = BrowserClient(
+        ws_url=args.url,
+        headless=args.headless,
+        user_data_dir=args.user_data_dir,
+        window_size=args.window_size,
+        position=args.position,
+        monitor=args.monitor,
+    )
     try:
         client.run()
     except KeyboardInterrupt:
