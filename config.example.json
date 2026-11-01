@@ -1,5 +1,6 @@
 {
   "WS_URL": "wss://prepodapi.toingg.com/api/v3/media/streaming",
-  "TOKEN":  "your-token-here",
-  "CAMP_ID": "your-campaign-id-here"
+  "TOKEN": "your-token-here",
+  "CAMP_ID": "your-campaign-id-here",
+  "BACKEND": "toingg" // "pipecat_gemini" enables the optional Pipecat/Gemini pipeline
 }
