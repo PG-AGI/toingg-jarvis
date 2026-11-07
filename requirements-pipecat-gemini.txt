@@ -1,0 +1,6 @@
+# Optional backend for BACKEND=pipecat_gemini
+fastapi>=0.115
+uvicorn[standard]>=0.30
+loguru>=0.7
+python-dotenv>=1.0
+pipecat-ai[google,websocket]>=0.0.105
