@@ -18,6 +18,13 @@ import ctypes, ctypes.wintypes
 import platform as _plat
 from datetime import datetime, timedelta, timezone
 
+from multipart_upload_manager import (
+    MultipartUploadError,
+    finalize_playwright_input_files,
+    get_uploaded_file,
+    handle_multipart_upload_request,
+    resolve_playwright_input_files,
+)
 from native_file_manager import NativeFileActionError, handle_file_action_payload
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
@@ -592,6 +599,27 @@ def execute_playwright_tool_action(payload):
         page.fill(selector, value, timeout=timeout)
         return {"action": action, "selector": selector}
 
+    if action in ("input_file", "set_input_files", "upload_file"):
+        selector = str(payload.get("selector", "")).strip()
+        if not selector:
+            raise ValueError(f"{action} action requires selector")
+        resolved_paths, consumed_tokens, ephemeral_paths = resolve_playwright_input_files(payload)
+        target_files = resolved_paths[0] if len(resolved_paths) == 1 else resolved_paths
+        try:
+            page.set_input_files(selector, target_files, timeout=timeout)
+        finally:
+            finalize_playwright_input_files(
+                consumed_tokens,
+                ephemeral_paths,
+                keep_uploaded=bool(payload.get("keep_uploaded", False)),
+            )
+        return {
+            "action": action,
+            "selector": selector,
+            "files": resolved_paths,
+            "file_tokens": consumed_tokens,
+        }
+
     if action == "screenshot":
         path = str(payload.get("path") or os.path.join(tempfile.gettempdir(), "jarvis-playwright.png"))
         page.screenshot(path=path, full_page=bool(payload.get("full_page", True)))
@@ -786,6 +814,21 @@ def start_http_server():
                 self._cors()
                 self.end_headers()
                 self.wfile.write(data)
+            elif self.path.startswith("/api/uploads/") or self.path.startswith("/upload/"):
+                token = self.path.rsplit("/", 1)[-1].strip()
+                try:
+                    item = get_uploaded_file(token)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": True, **item}).encode())
+                except MultipartUploadError as e:
+                    self.send_response(getattr(e, "status_code", 404))
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
             else:
                 self.send_response(404); self.end_headers()
 
@@ -893,6 +936,30 @@ def start_http_server():
                 except (NativeFileActionError, json.JSONDecodeError) as e:
                     print(f"  [file] action error: {e}")
                     self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+
+            elif self.path in ("/api/uploads", "/api/upload", "/upload", "/upload_file"):
+                try:
+                    content_type = self.headers.get("Content-Type", "")
+                    result = handle_multipart_upload_request(content_type, body)
+                    self.send_response(201)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps(result).encode())
+                except MultipartUploadError as e:
+                    print(f"  [upload] multipart upload error: {e}")
+                    self.send_response(getattr(e, "status_code", 400))
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+                except Exception as e:
+                    print(f"  [upload] unexpected error: {e}")
+                    self.send_response(500)
                     self.send_header("Content-Type", "application/json")
                     self._cors()
                     self.end_headers()

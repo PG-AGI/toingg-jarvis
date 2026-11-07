@@ -24,6 +24,10 @@ import base64
 
 import websocket
 from playwright.sync_api import sync_playwright, Page, Playwright
+from multipart_upload_manager import (
+    finalize_playwright_input_files,
+    resolve_playwright_input_files,
+)
 
 # playwright-stealth >= 2.x uses `Stealth`; older 1.x used `stealth_sync`.
 try:
@@ -1063,6 +1067,35 @@ class BrowserClient:
                 self._human_delay()
                 page.select_option(selector, value)
                 return {"success": True, "result": f"Selected '{value}' in '{selector}'"}
+
+            elif action in ("input_file", "set_input_files", "upload_file"):
+                selector = str(params.get("selector", "")).strip()
+                if not selector:
+                    return {"success": False, "error": f"{action} action requires selector"}
+                timeout = int(params.get("timeout", 10000))
+                resolved_paths, consumed_tokens, ephemeral_paths = resolve_playwright_input_files(params)
+                target_files = resolved_paths[0] if len(resolved_paths) == 1 else resolved_paths
+                self._human_delay(80, 250)
+                try:
+                    try:
+                        page.set_input_files(selector, target_files, timeout=timeout)
+                    except Exception:
+                        repaired = self._repair_selector(selector)
+                        if repaired == selector:
+                            raise
+                        page.set_input_files(repaired, target_files, timeout=timeout)
+                finally:
+                    finalize_playwright_input_files(
+                        consumed_tokens,
+                        ephemeral_paths,
+                        keep_uploaded=bool(params.get("keep_uploaded", False)),
+                    )
+                return {
+                    "success": True,
+                    "result": f"Uploaded {len(resolved_paths)} file(s) to '{selector}'",
+                    "files": resolved_paths,
+                    "file_tokens": consumed_tokens,
+                }
 
             elif action == "scroll":
                 x = params.get("x", 0)

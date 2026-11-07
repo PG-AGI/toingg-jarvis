@@ -85,6 +85,16 @@ class NativeFileManagerTests(unittest.TestCase):
         with self.assertRaises(NativeFileActionError):
             handle_file_action_payload([])
 
+    def test_non_string_actions_raise_validation_error(self):
+        for invalid_action in ([], {}, None, 123, True):
+            with self.subTest(action=invalid_action):
+                with self.assertRaises(NativeFileActionError):
+                    plan_file_action(invalid_action, str(self.file_path))
+                with self.assertRaises(NativeFileActionError):
+                    handle_file_action_payload(
+                        {"action": invalid_action, "path": str(self.file_path), "dry_run": True}
+                    )
+
 
 if __name__ == "__main__":
     unittest.main()
