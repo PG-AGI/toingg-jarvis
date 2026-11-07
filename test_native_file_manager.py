@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from native_file_manager import (
     NativeFileActionError,
@@ -84,6 +85,22 @@ class NativeFileManagerTests(unittest.TestCase):
             plan_file_action("open_file", str(self.root))
         with self.assertRaises(NativeFileActionError):
             handle_file_action_payload([])
+
+    @patch("native_file_manager.subprocess.Popen")
+    def test_non_string_actions_raise_validation_error_without_launching(self, mock_popen):
+        for invalid_action in (["open_file"], {"name": "open_file"}, {"open_file"}, None, 123, True):
+            with self.subTest(action=invalid_action):
+                with self.assertRaises(NativeFileActionError):
+                    plan_file_action(invalid_action, str(self.file_path))
+                with self.assertRaises(NativeFileActionError):
+                    handle_file_action_payload(
+                        {
+                            "action": invalid_action,
+                            "path": str(self.file_path),
+                            "dry_run": False,
+                        }
+                    )
+        mock_popen.assert_not_called()
 
 
 if __name__ == "__main__":
