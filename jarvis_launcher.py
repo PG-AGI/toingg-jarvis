@@ -1323,7 +1323,12 @@ def check_api_key():
             print("  ⚠   Invalid choice. Enter 1, 2, 3, Q, or paste your API key.\n", flush=True)
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
-def main():
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if "--gui" in argv:
+        from desktop_gui import launch_desktop_gui
+        launch_desktop_gui()
+        return
     print("""
   ╔══════════════════════════════════════════╗
   ║   W E E S T R E A M  //  J A R V I S    ║
