@@ -18,6 +18,14 @@ import ctypes, ctypes.wintypes
 import platform as _plat
 from datetime import datetime, timedelta, timezone
 
+import argparse
+from browser_window_config import (
+    BrowserWindowConfig,
+    BrowserWindowConfigError,
+    compute_window_geometry,
+    load_browser_window_config,
+    resolve_monitor_bounds,
+)
 from native_file_manager import NativeFileActionError, handle_file_action_payload
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
@@ -43,6 +51,50 @@ _url_slot      = 0
 _url_slot_wins = {}
 _url_slot_modes = {}
 _slot_profiles = {}
+_browser_window_config = None
+_browser_window_cli_overrides = {}
+
+
+def get_browser_window_config(force_reload=False):
+    global _browser_window_config
+    if _browser_window_config is None or force_reload:
+        _browser_window_config = load_browser_window_config(
+            cli_args=_browser_window_cli_overrides,
+            config_path=os.path.join(_DIR, "config.json"),
+            default_size=(URL_WIN_W, URL_WIN_H),
+            default_position="grid",
+            default_monitor="active",
+        )
+    return _browser_window_config
+
+
+def set_browser_window_config(overrides):
+    global _browser_window_config, _browser_window_cli_overrides
+    if isinstance(overrides, BrowserWindowConfig):
+        _browser_window_config = overrides
+        return _browser_window_config
+    if isinstance(overrides, dict):
+        _browser_window_cli_overrides = {
+            k: v for k, v in overrides.items() if v is not None
+        }
+    _browser_window_config = load_browser_window_config(
+        cli_args=_browser_window_cli_overrides,
+        config_path=os.path.join(_DIR, "config.json"),
+        default_size=(URL_WIN_W, URL_WIN_H),
+        default_position="grid",
+        default_monitor="active",
+    )
+    return _browser_window_config
+
+
+def _target_monitor_bounds(preferred_monitor=None):
+    cfg = get_browser_window_config()
+    monitor_name = preferred_monitor or cfg.preferred_monitor
+    return resolve_monitor_bounds(
+        monitor_name,
+        active_bounds=get_active_screen_bounds(),
+        primary_size=get_screen_size(),
+    )
 
 # ── APP REGISTRY ──────────────────────────────────────────────────────────────
 _IS_MAC = _plat.system() == "Darwin"
@@ -267,25 +319,22 @@ def _ensure_profile(slot):
         _slot_profiles[slot] = d
     return _slot_profiles[slot]
 
-def _slot_pos(slot):
+def _slot_pos(slot, tab=None):
     """
-    2×2 grid inset from screen edges:
-      slot 0 = top-left    slot 1 = top-right
-      slot 2 = bottom-left slot 3 = bottom-right
+    Resolve window coordinates for a slot using configured monitor, window size, and position.
     """
-    screen = get_active_screen_bounds()
-    if screen:
-        sx, sy, sw, sh = screen
-    else:
-        sx, sy = 0, 0
-        sw, sh = get_screen_size()
-    p   = _PADDING
-    col = slot % 2
-    row = slot // 2
-    x   = sx + p + col * (URL_WIN_W + p)
-    y   = sy + p + row * (URL_WIN_H + p)
-    x   = min(x, sx + sw - URL_WIN_W - p)
-    y   = min(y, sy + sh - URL_WIN_H - p)
+    cfg = get_browser_window_config()
+    override_mon = None
+    if isinstance(tab, dict):
+        override_mon = tab.get("preferred_monitor") or tab.get("monitor")
+    mon_bounds = _target_monitor_bounds(override_mon)
+    _, _, x, y = compute_window_geometry(
+        cfg,
+        slot=slot,
+        monitor_bounds=mon_bounds,
+        padding=_PADDING,
+        tab_overrides=tab if isinstance(tab, dict) else None,
+    )
     return x, y
 
 def _is_desktop_preview_tab(tab):
@@ -327,8 +376,16 @@ def open_url_in_slot(url, slot, tab=None):
     if desktop_preview:
         win_w, win_h, x, y = _desktop_preview_geometry()
     else:
-        win_w, win_h = URL_WIN_W, URL_WIN_H
-        x, y = _slot_pos(slot)
+        cfg = get_browser_window_config()
+        override_mon = tab.get("preferred_monitor") or tab.get("monitor") if isinstance(tab, dict) else None
+        mon_bounds = _target_monitor_bounds(override_mon)
+        win_w, win_h, x, y = compute_window_geometry(
+            cfg,
+            slot=slot,
+            monitor_bounds=mon_bounds,
+            padding=_PADDING,
+            tab_overrides=tab if isinstance(tab, dict) else None,
+        )
     profile = _ensure_profile(slot)
 
     old = _url_slot_wins.get(slot)
@@ -786,6 +843,14 @@ def start_http_server():
                 self._cors()
                 self.end_headers()
                 self.wfile.write(data)
+            elif self.path == "/window_config":
+                cfg = get_browser_window_config()
+                data = json.dumps({"ok": True, "browser": cfg.to_dict()}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self._cors()
+                self.end_headers()
+                self.wfile.write(data)
             else:
                 self.send_response(404); self.end_headers()
 
@@ -892,6 +957,31 @@ def start_http_server():
                     self.wfile.write(json.dumps(response).encode())
                 except (NativeFileActionError, json.JSONDecodeError) as e:
                     print(f"  [file] action error: {e}")
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+
+            elif self.path == "/window_config":
+                try:
+                    payload = json.loads(body) if body else {}
+                    if not isinstance(payload, dict):
+                        raise BrowserWindowConfigError("payload must be a JSON object")
+                    section = payload.get("browser") if isinstance(payload.get("browser"), dict) else payload
+                    cfg = set_browser_window_config(
+                        {
+                            "monitor": section.get("preferred_monitor") or section.get("monitor"),
+                            "window_size": section.get("window_size"),
+                            "position": section.get("position") or section.get("window_position"),
+                        }
+                    )
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": True, "browser": cfg.to_dict()}).encode())
+                except (BrowserWindowConfigError, json.JSONDecodeError) as e:
                     self.send_response(400)
                     self.send_header("Content-Type", "application/json")
                     self._cors()
@@ -1323,7 +1413,40 @@ def check_api_key():
             print("  ⚠   Invalid choice. Enter 1, 2, 3, Q, or paste your API key.\n", flush=True)
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
-def main():
+def parse_launcher_cli_args(argv=None):
+    parser = argparse.ArgumentParser(description="JARVIS Web Launcher", add_help=True)
+    parser.add_argument(
+        "--monitor",
+        "--preferred-monitor",
+        dest="monitor",
+        default=None,
+        help="Preferred monitor for browser windows (e.g. primary, active, monitor-1, monitor-2)",
+    )
+    parser.add_argument(
+        "--window-size",
+        dest="window_size",
+        default=None,
+        help="Default width and height for browser windows (e.g. 1600x900)",
+    )
+    parser.add_argument(
+        "--position",
+        "--window-position",
+        dest="position",
+        default=None,
+        help="Window placement preset or coordinates (e.g. center, top-left, x=1920,y=0)",
+    )
+    args, _ = parser.parse_known_args(argv)
+    return set_browser_window_config(
+        {
+            "monitor": args.monitor,
+            "window_size": args.window_size,
+            "position": args.position,
+        }
+    )
+
+
+def main(argv=None):
+    parse_launcher_cli_args(argv)
     print("""
   ╔══════════════════════════════════════════╗
   ║   W E E S T R E A M  //  J A R V I S    ║
