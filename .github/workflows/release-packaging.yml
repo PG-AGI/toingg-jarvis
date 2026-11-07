@@ -1,0 +1,58 @@
+name: Cross-Platform Release Packaging
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-native-packages:
+    name: Package (${{ matrix.target_os }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target_os: linux
+          - runner: windows-latest
+            target_os: windows
+          - runner: macos-latest
+            target_os: macos
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run packaging unit tests
+        run: python -m unittest discover -v -p "test_packaging*.py"
+
+      - name: Build native installer packages
+        run: python -m packaging.installer_builder --target ${{ matrix.target_os }} --output-dir dist/installers
+
+      - name: Upload native installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: toingg-jarvis-${{ matrix.target_os }}-installers
+          path: |
+            dist/installers/*.deb
+            dist/installers/*.zip
+            dist/installers/windows/*.iss
+            dist/installers/windows/*.nsi
+
+      - name: Publish versioned GitHub Release assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/installers/*.deb
+            dist/installers/*.zip
