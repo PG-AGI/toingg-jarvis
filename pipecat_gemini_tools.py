@@ -1,9 +1,8 @@
-"""
-Pipecat/Gemini tool-call bridge for the local JARVIS launcher.
+"""Pipecat and Gemini Live tool-call bridge and backend selector for JARVIS.
 
-The bridge is intentionally dependency-light: it can be imported when Pipecat is
-not installed, but it will return a real FunctionCallResultFrame when Pipecat is
-available.
+Maps Gemini function-call declarations and runtime FunctionCallFrame events to
+the local JARVIS HTTP launcher on localhost:8766 while keeping Pipecat an
+optional dependency so the default Toingg voice path remains unaffected.
 """
 
 from __future__ import annotations
@@ -17,9 +16,14 @@ from urllib.error import HTTPError, URLError
 
 
 DEFAULT_LAUNCHER_URL = "http://localhost:8766"
+DEFAULT_BACKEND = "toingg"
+PIPECAT_GEMINI_BACKEND = "pipecat_gemini"
+DEFAULT_PIPECAT_WS_URL = "ws://localhost:8767"
+DEFAULT_GEMINI_MODEL = "models/gemini-2.0-flash-live-001"
+DEFAULT_GEMINI_VOICE = "Puck"
 
 
-TOOL_DEFINITIONS = [
+TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "name": "open_browser",
         "description": "Open a URL in a managed browser window.",
@@ -87,6 +91,8 @@ TOOL_DEFINITIONS = [
 
 @dataclass
 class FunctionCall:
+    """Normalized representation of a Gemini tool invocation frame."""
+
     name: str
     arguments: dict[str, Any]
     tool_call_id: str = ""
@@ -94,13 +100,50 @@ class FunctionCall:
 
 @dataclass
 class LocalFunctionCallResultFrame:
+    """Fallback result frame used when Pipecat is not installed in the active environment."""
+
     function_name: str
     tool_call_id: str
     arguments: dict[str, Any]
     result: dict[str, Any]
 
 
-def _first_attr(obj: Any, *names: str) -> Any:
+def resolve_backend_mode(config: dict[str, Any] | None) -> str:
+    """Determine the active voice backend, defaulting to Toingg when omitted."""
+    if not isinstance(config, dict):
+        return DEFAULT_BACKEND
+    raw_backend = str(config.get("BACKEND") or config.get("backend") or "").strip().lower()
+    if raw_backend == PIPECAT_GEMINI_BACKEND:
+        return PIPECAT_GEMINI_BACKEND
+    return DEFAULT_BACKEND
+
+
+def is_pipecat_gemini_backend(config: dict[str, Any] | None) -> bool:
+    """Check whether config.json explicitly selects the Pipecat/Gemini Live backend."""
+    return resolve_backend_mode(config) == PIPECAT_GEMINI_BACKEND
+
+
+def resolve_effective_config(config: dict[str, Any] | None) -> dict[str, Any]:
+    """Normalize runtime configuration while preserving Toingg defaults when Pipecat is inactive."""
+    base = dict(config) if isinstance(config, dict) else {}
+    backend = resolve_backend_mode(base)
+    base["BACKEND"] = backend
+    if backend != PIPECAT_GEMINI_BACKEND:
+        return base
+
+    # Point the browser client to the local Pipecat WebSocket proxy unless a custom URL is set.
+    pipecat_ws = str(base.get("PIPECAT_WS_URL") or DEFAULT_PIPECAT_WS_URL).strip()
+    base["WS_URL"] = pipecat_ws
+    base.setdefault("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
+    base.setdefault("GEMINI_VOICE", DEFAULT_GEMINI_VOICE)
+    gemini_key = str(base.get("GEMINI_API_KEY") or base.get("GOOGLE_API_KEY") or "").strip()
+    if gemini_key and not base.get("TOKEN"):
+        base["TOKEN"] = gemini_key
+    return base
+
+
+def _first_attr(obj: Any, names: tuple[str, ...]) -> Any:
+    """Retrieve the first non-None attribute or dictionary key matching the candidate names."""
     for name in names:
         if isinstance(obj, dict) and name in obj:
             return obj[name]
@@ -109,16 +152,22 @@ def _first_attr(obj: Any, *names: str) -> Any:
     return None
 
 
+def _decode_json_object(raw: str) -> dict[str, Any]:
+    """Parse a JSON string argument payload and enforce object structure."""
+    parsed = json.loads(raw)
+    if not isinstance(parsed, dict):
+        raise ValueError("function call arguments must decode to a JSON object")
+    return parsed
+
+
 def _coerce_arguments(raw: Any) -> dict[str, Any]:
+    """Normalize tool arguments from dict, JSON string, or key-value iterable into a dictionary."""
     if raw is None:
         return {}
     if isinstance(raw, dict):
         return raw
     if isinstance(raw, str):
-        parsed = json.loads(raw)
-        if not isinstance(parsed, dict):
-            raise ValueError("function call arguments must decode to a JSON object")
-        return parsed
+        return _decode_json_object(raw)
     try:
         return dict(raw)
     except Exception as exc:
@@ -126,27 +175,39 @@ def _coerce_arguments(raw: Any) -> dict[str, Any]:
 
 
 def extract_function_call(frame: Any) -> FunctionCall:
-    name = _first_attr(frame, "function_name", "name", "tool_name")
+    """Extract tool name, arguments, and call ID from a Pipecat FunctionCallFrame."""
+    name = _first_attr(frame, ("function_name", "name", "tool_name"))
     if not name:
         raise ValueError("FunctionCallFrame is missing a function name")
 
-    arguments = _coerce_arguments(
-        _first_attr(frame, "arguments", "args", "function_args")
-    )
-    tool_call_id = _first_attr(frame, "tool_call_id", "id", "call_id") or ""
+    raw_args = _first_attr(frame, ("arguments", "args", "function_args"))
+    arguments = _coerce_arguments(raw_args)
+    tool_call_id = _first_attr(frame, ("tool_call_id", "id", "call_id")) or ""
     return FunctionCall(str(name), arguments, str(tool_call_id))
 
 
 def _normalize_url(url: str) -> str:
+    """Ensure browser URLs emitted by Gemini include an explicit scheme for Chrome slot launch."""
     if not isinstance(url, str) or not url.strip():
         raise ValueError("open_browser requires a non-empty url")
     clean = url.strip()
     if "://" not in clean:
-        clean = f"https://{clean}"
+        return f"https://{clean}"
     return clean
 
 
+def _parse_json_body(body: str) -> dict[str, Any]:
+    """Decode HTTP response text as JSON or wrap plain text in a dictionary."""
+    if not body:
+        return {}
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError:
+        return {"text": body}
+
+
 def post_json(url: str, payload: dict[str, Any], timeout: float = 10) -> dict[str, Any]:
+    """Dispatch a JSON POST request to the local JARVIS launcher HTTP server."""
     data = json.dumps(payload).encode("utf-8")
     req = request.Request(
         url,
@@ -157,20 +218,55 @@ def post_json(url: str, payload: dict[str, Any], timeout: float = 10) -> dict[st
     try:
         with request.urlopen(req, timeout=timeout) as resp:
             body = resp.read().decode("utf-8")
-            try:
-                parsed = json.loads(body) if body else {}
-            except json.JSONDecodeError:
-                parsed = {"text": body}
-            return {"ok": 200 <= resp.status < 300, "status": resp.status, "data": parsed}
+            return {"ok": 200 <= resp.status < 300, "status": resp.status, "data": _parse_json_body(body)}
     except HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
-        try:
-            parsed = json.loads(body) if body else {}
-        except json.JSONDecodeError:
-            parsed = {"text": body}
-        return {"ok": False, "status": exc.code, "data": parsed}
+        return {"ok": False, "status": exc.code, "data": _parse_json_body(body)}
     except URLError as exc:
         return {"ok": False, "error": str(exc.reason)}
+
+
+def _build_open_browser_request(arguments: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Map open_browser tool arguments to the launcher /open_window endpoint."""
+    url = _normalize_url(str(arguments.get("url", "")))
+    return "/open_window", {**arguments, "url": url}
+
+
+def _build_close_tabs_request(arguments: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Map close_tabs tool arguments to the launcher /close_tabs endpoint."""
+    return "/close_tabs", {"auto": bool(arguments.get("auto", False))}
+
+
+def _build_open_file_request(arguments: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Map open_file tool arguments to the validated /file_action endpoint."""
+    path = arguments.get("path")
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("open_file requires path")
+    return "/file_action", {"action": "open_file", "path": path}
+
+
+def _build_run_playwright_request(arguments: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Map single-step Playwright automation calls to /playwright_action."""
+    if not arguments.get("action"):
+        raise ValueError("run_playwright requires action")
+    return "/playwright_action", arguments
+
+
+def _build_playwright_actions_request(arguments: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Map multi-step Playwright automation batches to /playwright_actions."""
+    actions = arguments.get("actions")
+    if not isinstance(actions, list) or not actions:
+        raise ValueError("playwright_actions requires a non-empty actions list")
+    return "/playwright_actions", {"actions": actions}
+
+
+_TOOL_REQUEST_BUILDERS: dict[str, Callable[[dict[str, Any]], tuple[str, dict[str, Any]]]] = {
+    "open_browser": _build_open_browser_request,
+    "close_tabs": _build_close_tabs_request,
+    "open_file": _build_open_file_request,
+    "run_playwright": _build_run_playwright_request,
+    "playwright_actions": _build_playwright_actions_request,
+}
 
 
 def call_launcher_tool(
@@ -179,36 +275,17 @@ def call_launcher_tool(
     launcher_url: str = DEFAULT_LAUNCHER_URL,
     http_post: Callable[[str, dict[str, Any]], dict[str, Any]] = post_json,
 ) -> dict[str, Any]:
+    """Execute a Gemini tool call against the corresponding localhost:8766 launcher endpoint."""
+    builder = _TOOL_REQUEST_BUILDERS.get(name)
+    if builder is None:
+        raise ValueError(f"unsupported Gemini tool: {name}")
+    endpoint, payload = builder(arguments)
     base = launcher_url.rstrip("/")
-
-    if name == "open_browser":
-        payload = {**arguments, "url": _normalize_url(str(arguments.get("url", "")))}
-        return http_post(f"{base}/open_window", payload)
-
-    if name == "close_tabs":
-        return http_post(f"{base}/close_tabs", {"auto": bool(arguments.get("auto", False))})
-
-    if name == "open_file":
-        path = arguments.get("path")
-        if not isinstance(path, str) or not path.strip():
-            raise ValueError("open_file requires path")
-        return http_post(f"{base}/file_action", {"action": "open_file", "path": path})
-
-    if name == "run_playwright":
-        if not arguments.get("action"):
-            raise ValueError("run_playwright requires action")
-        return http_post(f"{base}/playwright_action", arguments)
-
-    if name == "playwright_actions":
-        actions = arguments.get("actions")
-        if not isinstance(actions, list) or not actions:
-            raise ValueError("playwright_actions requires a non-empty actions list")
-        return http_post(f"{base}/playwright_actions", {"actions": actions})
-
-    raise ValueError(f"unsupported Gemini tool: {name}")
+    return http_post(f"{base}{endpoint}", payload)
 
 
 def build_function_result_frame(call: FunctionCall, result: dict[str, Any]) -> Any:
+    """Construct a Pipecat FunctionCallResultFrame or local fallback frame for Gemini feedback."""
     try:
         from pipecat.frames.frames import FunctionCallResultFrame
     except Exception:
@@ -227,12 +304,7 @@ def build_function_result_frame(call: FunctionCall, result: dict[str, Any]) -> A
             result=result,
         )
     except TypeError:
-        return FunctionCallResultFrame(
-            call.name,
-            call.tool_call_id,
-            call.arguments,
-            result,
-        )
+        return FunctionCallResultFrame(call.name, call.tool_call_id, call.arguments, result)
 
 
 def handle_function_call_frame(
@@ -240,6 +312,7 @@ def handle_function_call_frame(
     launcher_url: str = DEFAULT_LAUNCHER_URL,
     http_post: Callable[[str, dict[str, Any]], dict[str, Any]] = post_json,
 ) -> Any:
+    """Process an incoming FunctionCallFrame against the launcher and return a result frame."""
     call = extract_function_call(frame)
     result = call_launcher_tool(
         call.name,
@@ -251,12 +324,7 @@ def handle_function_call_frame(
 
 
 def build_tools_schema() -> Any:
-    """Return Pipecat ToolsSchema when Pipecat is installed.
-
-    The fallback keeps the module importable in the default Toingg path, where
-    Pipecat is optional and may not be installed.
-    """
-
+    """Build Pipecat ToolsSchema when Pipecat is installed, or return raw tool definitions."""
     try:
         from pipecat.adapters.schemas.function_schema import FunctionSchema
         from pipecat.adapters.schemas.tools_schema import ToolsSchema
@@ -275,18 +343,27 @@ def build_tools_schema() -> Any:
     return ToolsSchema(standard_tools=functions)
 
 
+async def _invoke_result_callback(params: Any, result: dict[str, Any]) -> None:
+    """Send tool execution output to Pipecat's FunctionCallParams result_callback if present."""
+    callback = _first_attr(params, ("result_callback",))
+    if not callback:
+        return
+    maybe_awaitable = callback(result)
+    if hasattr(maybe_awaitable, "__await__"):
+        await maybe_awaitable
+
+
 async def handle_function_call_params(
     params: Any,
     launcher_url: str = DEFAULT_LAUNCHER_URL,
     http_post: Callable[[str, dict[str, Any]], dict[str, Any]] = post_json,
     function_name: str | None = None,
 ) -> dict[str, Any]:
-    """Pipecat FunctionCallParams handler for the launcher-backed tools."""
-
-    name = function_name or _first_attr(params, "function_name", "name")
+    """Handle async Pipecat FunctionCallParams invocations without blocking the audio loop."""
+    name = function_name or _first_attr(params, ("function_name", "name"))
     if not name:
         raise ValueError("FunctionCallParams is missing function_name")
-    arguments = _coerce_arguments(_first_attr(params, "arguments", "args"))
+    arguments = _coerce_arguments(_first_attr(params, ("arguments", "args")))
 
     result = await asyncio.to_thread(
         call_launcher_tool,
@@ -295,14 +372,31 @@ async def handle_function_call_params(
         launcher_url,
         http_post,
     )
-
-    callback = _first_attr(params, "result_callback")
-    if callback:
-        maybe_awaitable = callback(result)
-        if hasattr(maybe_awaitable, "__await__"):
-            await maybe_awaitable
-
+    await _invoke_result_callback(params, result)
     return result
+
+
+def _create_tool_handler(
+    tool_name: str,
+    launcher_url: str,
+    http_post: Callable[[str, dict[str, Any]], dict[str, Any]],
+) -> Callable[[Any], Any]:
+    """Bind a specific launcher tool name to an async Pipecat function handler."""
+
+    async def handler(params: Any) -> dict[str, Any]:
+        if not _first_attr(params, ("function_name", "name")):
+            try:
+                setattr(params, "function_name", tool_name)
+            except Exception:
+                pass
+        return await handle_function_call_params(
+            params,
+            launcher_url=launcher_url,
+            http_post=http_post,
+            function_name=tool_name,
+        )
+
+    return handler
 
 
 def register_launcher_tools(
@@ -311,28 +405,14 @@ def register_launcher_tools(
     http_post: Callable[[str, dict[str, Any]], dict[str, Any]] = post_json,
     cancel_on_interruption: bool = True,
 ) -> list[str]:
-    """Register all JARVIS launcher tools on a Pipecat LLM service."""
-
+    """Register all JARVIS launcher tools on a Pipecat Gemini LLM service instance."""
     if not hasattr(llm_service, "register_function"):
         raise TypeError("llm_service must provide register_function(name, handler, ...)")
 
-    registered = []
+    registered: list[str] = []
     for tool in TOOL_DEFINITIONS:
         name = str(tool["name"])
-
-        async def handler(params: Any, tool_name: str = name) -> dict[str, Any]:
-            if not _first_attr(params, "function_name", "name"):
-                try:
-                    setattr(params, "function_name", tool_name)
-                except Exception:
-                    pass
-            return await handle_function_call_params(
-                params,
-                launcher_url=launcher_url,
-                http_post=http_post,
-                function_name=tool_name,
-            )
-
+        handler = _create_tool_handler(name, launcher_url, http_post)
         llm_service.register_function(
             name,
             handler,

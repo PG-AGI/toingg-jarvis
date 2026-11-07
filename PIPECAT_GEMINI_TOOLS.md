@@ -1,56 +1,46 @@
-# Pipecat Gemini tool bridge
+# Pipecat & Gemini Live Multimodal Voice Pipeline (`#11`)
 
-Issue #11 requires Gemini function calls to reach the local launcher instead of
-stopping at model-side tool declarations. `pipecat_gemini_tools.py` provides the
-missing bridge:
+`pipecat_gemini_tools.py` and `pipecat_gemini_pipeline.py` integrate [Pipecat](https://github.com/pipecat-ai/pipecat) and the Google Gemini Multimodal Live API (`GeminiMultimodalLiveLLMService`) as an optional real-time voice, vision, and tool-calling backend alongside the default Toingg engine.
 
-1. Register the launcher tools with the Gemini/Pipecat LLM service.
-2. When the Pipecat proxy receives a function-call frame, call
-   `handle_function_call_frame(frame)`.
-3. Push the returned frame back into the Pipecat pipeline so Gemini receives the
-   tool result and can verbally confirm the action.
+## 1. Backend Switching (`config.json`)
 
-The bridge keeps Pipecat optional. If Pipecat is installed, the returned object
-is a `FunctionCallResultFrame`; otherwise tests use a compatible local dataclass.
-For Pipecat's standard function-calling path, `build_tools_schema()` returns a
-`ToolsSchema` when Pipecat is installed, and `register_launcher_tools(llm)`
-registers async `FunctionCallParams` handlers with `llm.register_function(...)`.
+Toingg remains the default backend (`"BACKEND": "toingg"`). Setting `"BACKEND": "pipecat_gemini"` in `config.json` switches the session configuration to the local Pipecat/Gemini Live pipeline without breaking environments where Pipecat is not installed:
 
-## Launcher endpoint mapping
+```json
+{
+  "BACKEND": "pipecat_gemini",
+  "GEMINI_API_KEY": "your-gemini-api-key",
+  "GEMINI_MODEL": "models/gemini-2.0-flash-live-001",
+  "GEMINI_VOICE": "Puck",
+  "PIPECAT_WS_URL": "ws://localhost:8767"
+}
+```
+
+`resolve_effective_config(config)` in `pipecat_gemini_tools.py` preserves all Toingg settings by default and routes `WS_URL` to `PIPECAT_WS_URL` (`ws://localhost:8767`) only when `BACKEND=pipecat_gemini`.
+
+## 2. Real-Time Audio, Multimodal Vision & Interruption Handling
+
+`JarvisGeminiBridgeProcessor` in `pipecat_gemini_pipeline.py` bridges `jarvis_web.html` WebSocket events and Pipecat pipeline frames:
+
+- **Inbound Browser Audio (`media`)**: Converts base64 Float32 mono audio chunks (`8000 Hz`) from `jarvis_web.html` into signed 16-bit PCM `InputAudioRawFrame` objects (`float32_b64_to_pcm16`) so microphone audio flows continuously into Gemini Live.
+- **Inbound Multimodal Frames (`image`)**: Converts base64 image payloads into `InputImageRawFrame` objects for visual Q&A and screen/camera context.
+- **Outbound Gemini Audio & Text**: Converts Gemini `OutputAudioRawFrame` / `TTSAudioRawFrame` PCM16 audio back into base64 Float32 `media` payloads (`pcm16_to_float32_b64`) and streams `aiTextStream` / `transcription` events to the UI.
+- **Interruption Handling**: Translates barge-in `StartInterruptionFrame` / `UserStartedSpeakingFrame` events into `{"event": "clearAudio"}` so the browser immediately halts queued audio playback.
+
+## 3. Launcher Tool-Calling Bridge (`localhost:8766`)
+
+When Gemini invokes a tool, the pipeline catches `FunctionCallFrame` / `FunctionCallInProgressFrame`, executes the corresponding `localhost:8766` launcher endpoint, and pushes a `FunctionCallResultFrame` back into the pipeline so Gemini can verbally confirm the action:
 
 | Gemini tool | Launcher endpoint | Notes |
 | --- | --- | --- |
 | `open_browser` | `POST /open_window` | Adds `https://` when the model omits a scheme. |
 | `close_tabs` | `POST /close_tabs` | Supports the launcher's `auto` flag. |
-| `open_file` | `POST /file_action` | Uses the existing validated native file manager path. |
+| `open_file` | `POST /file_action` | Uses the validated native file manager path. |
 | `run_playwright` | `POST /playwright_action` | Runs one Playwright action through the launcher. |
 | `playwright_actions` | `POST /playwright_actions` | Runs an ordered batch of Playwright actions. |
 
-## Example proxy hook
-
-```python
-from pipecat_gemini_tools import (
-    build_tools_schema,
-    handle_function_call_frame,
-    register_launcher_tools,
-)
-
-# Pass this as the LLMContext tools value when creating the Gemini pipeline.
-tools = build_tools_schema()
-
-# Register the actual tool handlers on the Gemini/Pipecat LLM service.
-register_launcher_tools(llm)
-
-async def on_frame(frame, transport):
-    if frame.__class__.__name__ in ("FunctionCallFrame", "FunctionCallInProgressFrame"):
-        result_frame = handle_function_call_frame(frame)
-        await transport.push_frame(result_frame)
-```
-
-## Verification
+## 4. Verification
 
 ```bash
-python -m unittest test_pipecat_gemini_tools.py test_scheduled_actions.py
-python -m py_compile pipecat_gemini_tools.py jarvis_launcher.py test_pipecat_gemini_tools.py
-git diff --check
+python3 -m unittest test_pipecat_gemini_tools.py test_pipecat_gemini_pipeline.py
 ```
