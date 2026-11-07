@@ -24,6 +24,7 @@ import base64
 
 import websocket
 from playwright.sync_api import sync_playwright, Page, Playwright
+from screenshot_uploader import capture_and_handle_screenshot
 
 # playwright-stealth >= 2.x uses `Stealth`; older 1.x used `stealth_sync`.
 try:
@@ -95,10 +96,17 @@ STEALTH_INIT_SCRIPT = """
 
 
 class BrowserClient:
-    def __init__(self, ws_url: str, headless: bool = False, user_data_dir: str | None = None):
+    def __init__(
+        self,
+        ws_url: str,
+        headless: bool = False,
+        user_data_dir: str | None = None,
+        upload_url: str | None = None,
+    ):
         self.ws_url = ws_url
         self.headless = headless
         self.user_data_dir = os.path.expanduser(user_data_dir or ".browser-profile")
+        self.upload_url = upload_url
         self.ws: websocket.WebSocketApp | None = None
         self.page: Page | None = None
         self.playwright: Playwright | None = None
@@ -1030,14 +1038,29 @@ class BrowserClient:
                 return {"success": True, "result": content}
 
             elif action == "screenshot":
-                path = params.get("path")
-                if path:
-                    page.screenshot(path=path, full_page=params.get("full_page", False))
-                    return {"success": True, "result": f"Screenshot saved to {path}"}
-                else:
-                    img_bytes = page.screenshot(full_page=params.get("full_page", False))
-                    encoded = base64.b64encode(img_bytes).decode()
-                    return {"success": True, "result": f"data:image/png;base64,{encoded[:100]}... (truncated)"}
+                shot = capture_and_handle_screenshot(
+                    page,
+                    params=params,
+                    default_upload_url=self.upload_url,
+                    ws_url=self.ws_url,
+                    default_full_page=False,
+                )
+                if shot.get("uploaded"):
+                    response = {
+                        "success": True,
+                        "result": f"Screenshot uploaded to {shot['upload_url']} ({shot['filename']})",
+                        "upload_url": shot["upload_url"],
+                        "filename": shot["filename"],
+                        "status": shot["status"],
+                        "response": shot["response"],
+                    }
+                    if shot.get("path"):
+                        response["path"] = shot["path"]
+                    return response
+                if shot.get("path"):
+                    return {"success": True, "result": f"Screenshot saved to {shot['path']}"}
+                encoded = base64.b64encode(shot.get("bytes", b"")).decode()
+                return {"success": True, "result": f"data:image/png;base64,{encoded[:100]}... (truncated)"}
 
             elif action == "evaluate":
                 expression = params["expression"]
@@ -1329,9 +1352,19 @@ def main():
         default=".browser-profile",
         help="Persistent browser profile directory for cookies and login sessions",
     )
+    parser.add_argument(
+        "--upload-url",
+        default=None,
+        help="Backend endpoint URL for multipart/form-data screenshot uploads (e.g. http://localhost:8766/upload)",
+    )
     args = parser.parse_args()
 
-    client = BrowserClient(ws_url=args.url, headless=args.headless, user_data_dir=args.user_data_dir)
+    client = BrowserClient(
+        ws_url=args.url,
+        headless=args.headless,
+        user_data_dir=args.user_data_dir,
+        upload_url=args.upload_url,
+    )
     try:
         client.run()
     except KeyboardInterrupt:

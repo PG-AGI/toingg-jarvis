@@ -19,6 +19,12 @@ import platform as _plat
 from datetime import datetime, timedelta, timezone
 
 from native_file_manager import NativeFileActionError, handle_file_action_payload
+from screenshot_uploader import (
+    ScreenshotUploadError,
+    capture_and_handle_screenshot,
+    parse_multipart_upload,
+    resolve_screenshot_upload_url,
+)
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 _DIR        = os.path.dirname(os.path.abspath(__file__))
@@ -593,6 +599,23 @@ def execute_playwright_tool_action(payload):
         return {"action": action, "selector": selector}
 
     if action == "screenshot":
+        if resolve_screenshot_upload_url(payload):
+            shot = capture_and_handle_screenshot(
+                page,
+                params=payload,
+                default_full_page=True,
+            )
+            result = {
+                "action": action,
+                "uploaded": True,
+                "upload_url": shot["upload_url"],
+                "filename": shot["filename"],
+                "status": shot["status"],
+                "response": shot["response"],
+            }
+            if shot.get("path"):
+                result["path"] = shot["path"]
+            return result
         path = str(payload.get("path") or os.path.join(tempfile.gettempdir(), "jarvis-playwright.png"))
         page.screenshot(path=path, full_page=bool(payload.get("full_page", True)))
         return {"action": action, "path": path}
@@ -893,6 +916,30 @@ def start_http_server():
                 except (NativeFileActionError, json.JSONDecodeError) as e:
                     print(f"  [file] action error: {e}")
                     self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+
+            elif self.path in ("/upload", "/api/upload", "/api/uploads"):
+                try:
+                    content_type = self.headers.get("Content-Type", "")
+                    result = parse_multipart_upload(content_type, body)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps(result).encode())
+                except ScreenshotUploadError as e:
+                    print(f"  [upload] screenshot upload error: {e}")
+                    self.send_response(getattr(e, "status_code", 400))
+                    self.send_header("Content-Type", "application/json")
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+                except Exception as e:
+                    print(f"  [upload] unexpected error: {e}")
+                    self.send_response(500)
                     self.send_header("Content-Type", "application/json")
                     self._cors()
                     self.end_headers()
