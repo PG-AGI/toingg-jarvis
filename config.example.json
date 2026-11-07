@@ -1,5 +1,13 @@
 {
   "WS_URL": "wss://prepodapi.toingg.com/api/v3/media/streaming",
   "TOKEN":  "your-token-here",
-  "CAMP_ID": "your-campaign-id-here"
+  "CAMP_ID": "your-campaign-id-here",
+  "browser": {
+    "preferred_monitor": "active",
+    "window_size": {
+      "width": 1600,
+      "height": 900
+    },
+    "position": "center"
+  }
 }

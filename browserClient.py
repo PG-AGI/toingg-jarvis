@@ -24,6 +24,11 @@ import base64
 
 import websocket
 from playwright.sync_api import sync_playwright, Page, Playwright
+from browser_window_config import (
+    BrowserWindowConfig,
+    build_chromium_window_args,
+    load_browser_window_config,
+)
 
 # playwright-stealth >= 2.x uses `Stealth`; older 1.x used `stealth_sync`.
 try:
@@ -95,10 +100,30 @@ STEALTH_INIT_SCRIPT = """
 
 
 class BrowserClient:
-    def __init__(self, ws_url: str, headless: bool = False, user_data_dir: str | None = None):
+    def __init__(
+        self,
+        ws_url: str,
+        headless: bool = False,
+        user_data_dir: str | None = None,
+        monitor: str | None = None,
+        window_size: str | dict | tuple | None = None,
+        position: str | dict | tuple | None = None,
+        window_config: BrowserWindowConfig | None = None,
+    ):
         self.ws_url = ws_url
         self.headless = headless
         self.user_data_dir = os.path.expanduser(user_data_dir or ".browser-profile")
+        self.window_config = window_config or load_browser_window_config(
+            cli_args={
+                "monitor": monitor,
+                "window_size": window_size,
+                "position": position,
+            },
+            config_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json"),
+            default_size=(1366, 768),
+            default_position="center",
+            default_monitor="active",
+        )
         self.ws: websocket.WebSocketApp | None = None
         self.page: Page | None = None
         self.playwright: Playwright | None = None
@@ -1261,21 +1286,23 @@ class BrowserClient:
     def run(self):
         with sync_playwright() as pw:
             self.playwright = pw
+            launch_args = [
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+            ]
+            if not self.headless:
+                launch_args.extend(build_chromium_window_args(self.window_config))
+
             context = pw.chromium.launch_persistent_context(
                 user_data_dir=self.user_data_dir,
                 headless=self.headless,
-                args=[
-                    "--no-sandbox",
-                    "--disable-dev-shm-usage",
-                    # NOTE: --disable-blink-features=AutomationControlled is intentionally
-                    # omitted — the flag itself is a bot signal; stealth patches handle this.
-                ],
+                args=launch_args,
                 user_agent=(
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
                     "Chrome/124.0.0.0 Safari/537.36"
                 ),
-                viewport={"width": 1366, "height": 768},
+                viewport=self.window_config.window_size.to_dict(),
                 locale="en-US",
                 timezone_id="America/New_York",
                 color_scheme="light",
@@ -1329,9 +1356,36 @@ def main():
         default=".browser-profile",
         help="Persistent browser profile directory for cookies and login sessions",
     )
+    parser.add_argument(
+        "--monitor",
+        "--preferred-monitor",
+        dest="monitor",
+        default=None,
+        help="Preferred screen/monitor (e.g. primary, active, monitor-1, monitor-2)",
+    )
+    parser.add_argument(
+        "--window-size",
+        dest="window_size",
+        default=None,
+        help="Default browser window widthxheight (e.g. 1600x900)",
+    )
+    parser.add_argument(
+        "--position",
+        "--window-position",
+        dest="position",
+        default=None,
+        help="Browser window position preset or coordinates (e.g. center, top-left, x=1920,y=0)",
+    )
     args = parser.parse_args()
 
-    client = BrowserClient(ws_url=args.url, headless=args.headless, user_data_dir=args.user_data_dir)
+    client = BrowserClient(
+        ws_url=args.url,
+        headless=args.headless,
+        user_data_dir=args.user_data_dir,
+        monitor=args.monitor,
+        window_size=args.window_size,
+        position=args.position,
+    )
     try:
         client.run()
     except KeyboardInterrupt:
