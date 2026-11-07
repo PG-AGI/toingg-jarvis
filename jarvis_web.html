@@ -437,6 +437,8 @@ html, body {
 let WS_URL  = "";
 let TOKEN   = "";
 let CAMP_ID = "";
+let BACKEND = "toingg";
+let PIPECAT_WS_URL = "";
 const SAMPLE_IN  = 8000;    // mic rate sent to server
 const SAMPLE_OUT = 22050;   // server audio rate
 const CHUNK_SEND = 2048;    // float32 samples per WS send (matches py: 4×512)
@@ -817,7 +819,7 @@ function ensureAudioCtx() {
 // ═══════════════════════════════════════════════════════════════════
 //  AUDIO PLAYBACK  (mirrors playback_worker + enqueue_audio)
 // ═══════════════════════════════════════════════════════════════════
-function enqueueAudio(b64) {
+function enqueueAudio(b64, sampleRate = SAMPLE_OUT) {
   if (dropAudio) return;
   ensureAudioCtx();
   if (playbackIdleTimer) {
@@ -828,7 +830,7 @@ function enqueueAudio(b64) {
   const samples = b64ToFloat32(b64);
   if (!samples.length) return;
 
-  const buf    = audioCtx.createBuffer(1, samples.length, SAMPLE_OUT);
+  const buf    = audioCtx.createBuffer(1, samples.length, sampleRate);
   buf.copyToChannel(samples, 0);
 
   const src    = audioCtx.createBufferSource();
@@ -841,7 +843,7 @@ function enqueueAudio(b64) {
     ? nextPlayTime
     : underrunAt;
   src.start(startAt);
-  nextPlayTime = startAt + samples.length / SAMPLE_OUT;
+  nextPlayTime = startAt + samples.length / sampleRate;
 
   playScheduled++;
   activeAudioSources.add(src);
@@ -1419,17 +1421,23 @@ function connectWs() {
     setStatus("SYSTEMS ONLINE — AUTO-STARTING MIC...");
     logChat("sys", "◈ SECURE CHANNEL ESTABLISHED");
 
-    wsConn.send(JSON.stringify({
+    const startPayload = {
       event:        "start",
-      token:        TOKEN,
-      campId:       CAMP_ID,
+      backend:      BACKEND,
       codec:        "f32_raw",
       sampleRate:   SAMPLE_IN,
-      asr:          "AZURE",
       startMessage: true,
-      clearMemory: true,
-      wordsToInterrupt: 2
-    }));
+    };
+    if (BACKEND !== "pipecat_gemini") {
+      Object.assign(startPayload, {
+        token:        TOKEN,
+        campId:       CAMP_ID,
+        asr:          "AZURE",
+        clearMemory: true,
+        wordsToInterrupt: 2,
+      });
+    }
+    wsConn.send(JSON.stringify(startPayload));
 
     // auto-start mic after 1.2s — same as terminal
     setTimeout(startMic, 1200);
@@ -1448,7 +1456,7 @@ function connectWs() {
 
     if (ev === "media") {
       const p = msg.media?.payload;
-      if (p) enqueueAudio(p);
+      if (p) enqueueAudio(p, msg.media?.sampleRate || SAMPLE_OUT);
 
     } else if (ev === "aiTextStream") {
       const chunk = msg.text_chunk || "";
@@ -1611,7 +1619,9 @@ async function loadConfig() {
   const res = await fetch("config.json");
   if (!res.ok) throw new Error(`config.json not found (${res.status})`);
   const cfg = await res.json();
-  WS_URL  = cfg.WS_URL  || "";
+  BACKEND = String(cfg.BACKEND || "toingg").trim().toLowerCase();
+  PIPECAT_WS_URL = cfg.PIPECAT_WS_URL || `ws://${cfg.PIPECAT_HOST || "localhost"}:${cfg.PIPECAT_PORT || 8767}${cfg.PIPECAT_WS_PATH || "/ws"}`;
+  WS_URL  = BACKEND === "pipecat_gemini" ? PIPECAT_WS_URL : (cfg.WS_URL || "");
   TOKEN   = cfg.TOKEN   || "";
   CAMP_ID = cfg.CAMP_ID || "";
 }
@@ -1626,7 +1636,7 @@ async function boot() {
     return;
   }
 
-  if (!TOKEN) {
+  if (BACKEND !== "pipecat_gemini" && !TOKEN) {
     showSetup();
     return;
   }
