@@ -1,6 +1,7 @@
 import unittest
 
 from pipecat_gemini_tools import (
+    LauncherToolFrameProcessor,
     LocalFunctionCallResultFrame,
     build_tools_schema,
     call_launcher_tool,
@@ -150,6 +151,28 @@ class PipecatGeminiToolBridgeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(params.results, [result])
         self.assertEqual(calls[0][0], "http://localhost:8766/close_tabs")
         self.assertEqual(calls[0][1]["auto"], True)
+
+    async def test_frame_processor_catches_function_call_and_pushes_result_frame(self):
+        calls = []
+        pushed = []
+
+        def fake_post(url, payload):
+            calls.append((url, payload))
+            return {"ok": True, "status": 200, "data": {"ok": True}}
+
+        processor = LauncherToolFrameProcessor(
+            launcher_url="http://localhost:8766",
+            http_post=fake_post,
+            push_frame_fn=lambda f: pushed.append(f),
+        )
+        frame = DummyFunctionCallFrame()
+        result_frame = await processor.process_frame(frame)
+
+        self.assertEqual(len(pushed), 2)
+        self.assertIs(pushed[0], frame)
+        self.assertIs(pushed[1], result_frame)
+        self.assertIsInstance(result_frame, LocalFunctionCallResultFrame)
+        self.assertEqual(calls[0][0], "http://localhost:8766/open_window")
 
 
 if __name__ == "__main__":

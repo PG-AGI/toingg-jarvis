@@ -19,7 +19,7 @@ def _target_path(raw_path):
 
 
 def _validate_target(action, target):
-    if action not in SUPPORTED_ACTIONS:
+    if not isinstance(action, str) or action not in SUPPORTED_ACTIONS:
         raise NativeFileActionError(
             f"action must be one of: {', '.join(sorted(SUPPORTED_ACTIONS))}"
         )

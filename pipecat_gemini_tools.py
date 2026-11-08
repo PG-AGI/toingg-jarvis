@@ -340,3 +340,80 @@ def register_launcher_tools(
         )
         registered.append(name)
     return registered
+
+
+
+def is_function_call_frame(frame: Any) -> bool:
+    """Return True if frame is a Pipecat FunctionCallFrame or equivalent."""
+    cls_name = getattr(frame, "__class__", type(frame)).__name__
+    if cls_name in ("FunctionCallFrame", "FunctionCallInProgressFrame"):
+        return True
+    return bool(_first_attr(frame, "function_name", "tool_name") and _first_attr(frame, "tool_call_id", "call_id"))
+
+
+class LauncherToolFrameProcessor:
+    """
+    Pipecat frame processor that intercepts FunctionCallFrame instances,
+    executes the corresponding localhost:8766 launcher endpoint, and pushes
+    a FunctionCallResultFrame back downstream so Gemini can verbally confirm.
+    """
+
+    def __init__(
+        self,
+        launcher_url: str = DEFAULT_LAUNCHER_URL,
+        http_post: Callable[[str, dict[str, Any]], dict[str, Any]] = post_json,
+        push_frame_fn: Callable[[Any], Any] | None = None,
+    ):
+        self.launcher_url = launcher_url
+        self.http_post = http_post
+        self._push_frame_fn = push_frame_fn
+        self.processed_frames: list[Any] = []
+
+    async def push_frame(self, frame: Any, direction: Any = None) -> Any:
+        self.processed_frames.append(frame)
+        if self._push_frame_fn is not None:
+            res = self._push_frame_fn(frame)
+            if hasattr(res, "__await__"):
+                await res
+        return frame
+
+    async def process_frame(self, frame: Any, direction: Any = None) -> Any:
+        await self.push_frame(frame, direction)
+        if is_function_call_frame(frame):
+            result_frame = await asyncio.to_thread(
+                handle_function_call_frame,
+                frame,
+                self.launcher_url,
+                self.http_post,
+            )
+            await self.push_frame(result_frame, direction)
+            return result_frame
+        return frame
+
+
+def create_pipecat_gemini_service(
+    api_key: str,
+    launcher_url: str = DEFAULT_LAUNCHER_URL,
+    http_post: Callable[[str, dict[str, Any]], dict[str, Any]] = post_json,
+    voice_id: str = "Puck",
+    system_instruction: str = "You are JARVIS, a helpful real-time voice and browser assistant.",
+) -> Any:
+    """
+    Instantiate and configure Pipecat's GeminiMultimodalLiveLLMService with all
+    required JARVIS launcher tools registered. Returns None if Pipecat is not installed.
+    """
+    try:
+        from pipecat.services.gemini_multimodal_live.gemini import (
+            GeminiMultimodalLiveLLMService,
+        )
+    except Exception:
+        return None
+
+    llm = GeminiMultimodalLiveLLMService(
+        api_key=api_key,
+        voice_id=voice_id,
+        system_instruction=system_instruction,
+        tools=build_tools_schema(),
+    )
+    register_launcher_tools(llm, launcher_url=launcher_url, http_post=http_post)
+    return llm
