@@ -1,0 +1,9 @@
+#!/bin/sh
+set -e
+
+# Refresh desktop database so the launcher icon appears in menus
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database /usr/share/applications || true
+fi
+
+exit 0

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=JARVIS
+Comment=Voice-controlled desktop launcher
+Exec=/opt/jarvis/JARVIS
+Icon=/opt/jarvis/jarvis.png
+Terminal=true
+Type=Application
+Categories=Utility;

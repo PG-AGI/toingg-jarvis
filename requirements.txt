@@ -1,0 +1,12 @@
+# Core runtime dependencies for the JARVIS launcher
+sounddevice
+numpy
+SpeechRecognition
+websocket-client
+rich
+pyaudio
+playwright
+playwright-stealth
+
+# Packaging
+pyinstaller
