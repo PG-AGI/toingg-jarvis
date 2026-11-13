@@ -1,0 +1,107 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 2.0.0)"
+        required: true
+        default: "2.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: windows-installer
+          - os: ubuntu-latest
+            artifact: linux-deb
+          - os: macos-latest
+            artifact: macos-dmg
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "VERSION=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build executable
+        shell: bash
+        run: |
+          python -m PyInstaller packaging/jarvis.spec \
+            --distpath dist --workpath build --clean -y
+
+      - name: Package Windows installer (Inno Setup)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install innosetup -y
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" packaging\windows\installer.iss
+          New-Item -ItemType Directory -Force dist\installer | Out-Null
+
+      - name: Package Linux .deb
+        if: runner.os == 'Linux'
+        env:
+          JARVIS_VERSION: ${{ steps.version.outputs.VERSION }}
+        run: python packaging/linux/build_deb.py
+
+      - name: Package macOS .dmg
+        if: runner.os == 'macOS'
+        env:
+          JARVIS_VERSION: ${{ steps.version.outputs.VERSION }}
+        run: python packaging/macos/build_dmg.py
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/installer/*.exe
+            dist/*.deb
+            dist/*.dmg
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true

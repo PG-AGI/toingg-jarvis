@@ -1,0 +1,10 @@
+Package: jarvis
+Version: 2.0.0
+Section: utils
+Priority: optional
+Architecture: amd64
+Depends: python3 (>= 3.9), libportaudio2, libasound2
+Maintainer: toingg <noreply@toingg.com>
+Description: JARVIS voice-controlled desktop launcher
+ JARVIS is a wake-word activated voice assistant that opens web pages
+ and applications on Windows, Linux, and macOS.
