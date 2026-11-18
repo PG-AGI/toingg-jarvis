@@ -1,0 +1,10 @@
+Package: toingg-jarvis
+Version: @VERSION@
+Section: utils
+Priority: optional
+Architecture: all
+Depends: python3 (>= 3.9), python3-venv, python3-pip, portaudio19-dev
+Maintainer: PG-AGI <noreply@pg-agi.com>
+Description: Toingg Jarvis voice assistant launcher
+ Say "Hey Jarvis" to activate. Python dependencies are installed into a
+ per-user virtual environment on first launch.
