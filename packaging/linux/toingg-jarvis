@@ -1,0 +1,21 @@
+#!/bin/sh
+# Launcher installed to /usr/bin/toingg-jarvis by the .deb package.
+# The app writes config.json next to its code, so run from a per-user copy.
+SRC=/usr/share/toingg-jarvis
+DEST="${XDG_DATA_HOME:-$HOME/.local/share}/toingg-jarvis"
+
+mkdir -p "$DEST"
+for f in "$SRC"/*.py "$SRC"/*.html; do
+    cp -f "$f" "$DEST/"
+done
+[ -f "$DEST/config.json" ] || cp "$SRC/config.example.json" "$DEST/config.json"
+
+VENV="$DEST/venv"
+if [ ! -x "$VENV/bin/python" ]; then
+    python3 -m venv "$VENV" || exit 1
+    "$VENV/bin/python" -m pip install -q -r "$SRC/requirements.txt" || exit 1
+    "$VENV/bin/python" -m playwright install chromium
+fi
+
+cd "$DEST" || exit 1
+exec "$VENV/bin/python" jarvis_launcher.py "$@"

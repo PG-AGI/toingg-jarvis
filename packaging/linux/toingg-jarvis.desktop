@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Toingg Jarvis
+Comment=Voice assistant launcher
+Exec=toingg-jarvis
+Terminal=true
+Categories=Utility;
