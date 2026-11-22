@@ -4,16 +4,33 @@ A voice-driven AI terminal that connects to your JARVIS campaign, displays a liv
 
 ---
 
-## Files — put all of these in one folder
+## Before the first launch
 
-| File | What it does |
-|---|---|
-| `jarvis_terminal.py` | Main script — terminal UI, mic, audio, WebSocket |
-| `jarvis_visual.html` | JARVIS orb animation (opened automatically) |
-| `JARVIS.command` | **Mac** double-click launcher |
-| `JARVIS.bat` | **Windows** double-click launcher |
+Clone or extract the whole repository and keep its files together. Both
+[`JARVIS.command`](JARVIS.command) (macOS) and [`JARVIS.bat`](JARVIS.bat)
+(Windows) run [`jarvis_launcher.py`](jarvis_launcher.py). It serves the
+voice interface from [`jarvis_web.html`](jarvis_web.html) and starts
+[`browserClient.py`](browserClient.py) for browser commands.
 
-That's it. All 4 files in the same folder.
+From the repository folder, create your local settings file if it does not
+already exist.
+
+**Windows PowerShell**
+
+```powershell
+if (-not (Test-Path config.json)) { Copy-Item config.example.json config.json }
+```
+
+**macOS Terminal**
+
+```sh
+test -f config.json || cp config.example.json config.json
+```
+
+Open `config.json` in a text editor. Set `TOKEN` to your Toingg API key and
+`CAMP_ID` to your campaign ID. Keep `WS_URL` from the
+[`configuration template`](config.example.json) unless your campaign uses
+a different endpoint. These settings stay in the git-ignored `config.json`.
 
 ---
 
@@ -77,23 +94,10 @@ Just double-click `JARVIS.bat`
 
 ---
 
-## Config (inside jarvis_terminal.py)
-
-If you need to change the campaign or token, open `jarvis_terminal.py` and edit lines 22–24:
-
-```python
-WS_URL  = "wss://prepodapi.toingg.com/api/v3/media/streaming"
-TOKEN   = "your-token-here"
-CAMP_ID = "your-campaign-id-here"
-```
-
----
-
 ## What it does
 
 - Connects to your JARVIS AI campaign over WebSocket
-- Opens a live terminal UI with spectrum visualizer
-- Press **Enter** to speak — JARVIS listens and responds via audio
+- Listens for **Hey Jarvis** and opens the voice interface in Chrome
 - When JARVIS fetches news/weather/war updates, browser tabs open automatically in a 2×2 grid
 - JARVIS can open specific URLs, scrape article details, and close tabs on command
 - Press **Ctrl+C** to stop
