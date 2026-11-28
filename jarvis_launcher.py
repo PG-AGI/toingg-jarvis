@@ -21,7 +21,18 @@ from datetime import datetime, timedelta, timezone
 from native_file_manager import NativeFileActionError, handle_file_action_payload
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
-_DIR        = os.path.dirname(os.path.abspath(__file__))
+def _resource_dir():
+    """Return the directory that holds bundled resources.
+
+    When frozen by PyInstaller the resources live in ``sys._MEIPASS``; in a
+    normal source checkout they sit next to this file.  This keeps the launcher
+    working from a native installer as well as from a plain ``python`` run.
+    """
+    if getattr(sys, "frozen", False):
+        return getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(sys.executable)))
+    return os.path.dirname(os.path.abspath(__file__))
+
+_DIR        = _resource_dir()
 WEB_HTML    = os.path.join(_DIR, "jarvis_web.html")
 VISUAL_HTML = os.path.join(_DIR, "jarvis_visual.html")
 BROWSER_CLIENT = os.path.join(_DIR, "browserClient.py")
